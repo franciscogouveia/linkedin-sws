@@ -29,11 +29,9 @@ const configSchema = z.strictObject({
         !url.password &&
         !url.search &&
         !url.hash &&
-        (url.protocol === 'https:' ||
-          (url.protocol === 'http:' &&
-            ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
+        (url.protocol === 'https:' || url.protocol === 'http:')
       );
-    }, 'Use HTTPS, or HTTP for a local server, without credentials or query parameters.'),
+    }, 'Use HTTP or HTTPS without credentials, query parameters, or fragments.'),
     model: nonempty,
     api_key: nonempty.refine(
       (value) => !/^(YOUR_|REPLACE_|CHANGE_ME)/i.test(value),

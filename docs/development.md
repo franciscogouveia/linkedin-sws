@@ -82,6 +82,11 @@ llm:
 
 Compatibility depends on the server version and model. See
 [Ollama's compatibility documentation](https://docs.ollama.com/api/openai-compatibility).
+For an Ollama server on your LAN, use its reachable address, for example
+`base_url: http://192.168.0.2:11434/v1`. HTTP and HTTPS endpoints are supported;
+include `/v1` and keep the model name consistent with a model installed on that
+server. A trailing slash is optional. URLs cannot include credentials, query
+parameters, or fragments.
 If the server rejects structured output, set `structured_output: false`; invalid
 assessment JSON still stops the run. LLM requests are not automatically retried.
 

@@ -26,18 +26,28 @@ test('configuration rejects live mode, unsupported filters, duplicate keys, and 
   }
 });
 
-test('configuration permits local Ollama and rejects remote plaintext endpoints and credential URLs', () => {
-  const local = configYaml.replace(
-    'https://api.openai.com/v1',
-    'http://localhost:11434/v1/',
-  );
-  assert.equal(
-    parseConfig(local, '/tmp/config.yaml').llm.base_url,
-    'http://localhost:11434/v1/',
-  );
+test('configuration permits Ollama over HTTP on loopback, LAN addresses, and hostnames', () => {
   for (const endpoint of [
-    'http://example.com/v1',
+    'http://localhost:11434/v1/',
+    'http://192.168.0.2:11434/v1',
+    'http://ollama.lan:11434/v1/',
+    'https://api.openai.com/v1',
+  ]) {
+    const config = parseConfig(
+      configYaml.replace('https://api.openai.com/v1', endpoint),
+      '/tmp/config.yaml',
+    );
+    assert.equal(config.llm.base_url, endpoint);
+  }
+});
+
+test('configuration rejects non-HTTP protocols and URLs with credentials, queries, or fragments', () => {
+  for (const endpoint of [
+    'ftp://example.com/v1',
     'https://secret@example.com/v1',
+    'http://user:password@192.168.0.2:11434/v1',
+    'http://192.168.0.2:11434/v1?token=secret',
+    'http://192.168.0.2:11434/v1#fragment',
   ]) {
     assert.throws(() =>
       parseConfig(
