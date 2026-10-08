@@ -1,0 +1,26 @@
+# Copy to config.yaml. All application settings live here; the CLI takes no arguments.
+mode: dryrun
+pitch_path: pitch.md
+queue_path: data/queue.sqlite
+max_profiles_per_run: 1
+
+search:
+  keywords: '"angel investor"'
+  max_results: 5
+  max_pages: 1
+
+linkedin:
+  session_dir: data/browser
+  timeout_ms: 30000
+  login_timeout_ms: 300000
+
+llm:
+  provider: openai-compatible
+  base_url: https://api.openai.com/v1
+  model: gpt-6-luna
+  api_key: YOUR_OPENAI_API_KEY
+  api: responses
+  structured_output: true
+  timeout_ms: 60000
+  max_output_tokens: 2048
+  max_message_characters: 1500

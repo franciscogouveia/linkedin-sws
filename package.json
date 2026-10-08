@@ -1,0 +1,33 @@
+{
+  "name": "linkedin-search-write-send",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local LinkedIn investor discovery and personalized pitch prototype",
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "node src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --test-isolation=none tests/*.test.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run typecheck && npm test && npm run format:check",
+    "browser:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "openai": "7.30.1",
+    "playwright": "1.64.0",
+    "proper-lockfile": "4.1.2",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3"
+  }
+}

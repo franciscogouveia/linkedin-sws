@@ -1,0 +1,13 @@
+AGENTS.md
+docs/implementation-plan.md
+node_modules/
+dist/
+data/
+config.yaml
+pitch.md
+package-lock.json
+.cache/
+.aws/
+.agents/
+.codex/
+
