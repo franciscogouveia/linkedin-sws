@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { z } from 'zod';
 import type { Config } from './config.ts';
 import { ApplicationError } from './errors.ts';
+import { describeLlmError } from './llm-error.ts';
 import type { Assessment, PitchWriter, Profile } from './types.ts';
 
 const assessmentSchema = z.strictObject({
@@ -152,13 +153,21 @@ export class LlmWriter implements PitchWriter {
     } catch (error) {
       if (this.signal.aborted) throw this.signal.reason;
       if (error instanceof ApplicationError) throw error;
-      if (error instanceof OpenAI.APIError) {
-        throw new ApplicationError(
-          `LLM request failed${error.status ? ` (HTTP ${error.status})` : ''}. Check the endpoint, key, model, and API compatibility. Queue row remains working.`,
-        );
-      }
+      const source = JSON.parse(input) as { pitch?: string; profile: Profile };
       throw new ApplicationError(
-        'Cannot reach the LLM service. Check its availability and configured timeout. Queue row remains working.',
+        describeLlmError(
+          error,
+          this.settings,
+          classification ? 'classification' : 'message generation',
+          [
+            input,
+            instructions,
+            source.pitch ?? '',
+            source.profile.name,
+            source.profile.slug,
+            source.profile.text,
+          ],
+        ),
       );
     }
   }

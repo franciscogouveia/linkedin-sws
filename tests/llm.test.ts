@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import OpenAI from 'openai';
 import { LlmWriter, parseAssessment } from '../src/llm.ts';
+import { describeLlmError } from '../src/llm-error.ts';
 import { profile, testConfig } from './helpers.ts';
 
 test('investor classification requires a quoted source excerpt and validates the entire response', () => {
@@ -133,7 +135,9 @@ test('chat-completions endpoint is available for compatible local providers', as
   assert.equal(request?.response_format, undefined);
 });
 
-test('HTTP failures do not retry or expose provider error contents', async (t) => {
+test('HTTP failures expose provider diagnostics, redact the key, and do not retry', async (t) => {
+  const settings = testConfig('/tmp').llm;
+  settings.api_key = 'private-secret-test';
   const fetch = t.mock.method(
     globalThis,
     'fetch',
@@ -141,24 +145,110 @@ test('HTTP failures do not retry or expose provider error contents', async (t) =
       new Response(
         JSON.stringify({
           error: {
-            message: 'private-secret-test',
+            message: 'Invalid API key: private-secret-test',
             type: 'authentication_error',
+            code: 'invalid_api_key',
           },
         }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } },
+        {
+          status: 401,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-request-id': 'req_failure',
+          },
+        },
       ),
   );
-  const writer = new LlmWriter(
-    testConfig('/tmp').llm,
-    new AbortController().signal,
-  );
+  const writer = new LlmWriter(settings, new AbortController().signal);
   await assert.rejects(writer.classify(profile), (error) => {
     assert.ok(error instanceof Error);
     assert.match(error.message, /HTTP 401/);
+    assert.match(error.message, /Invalid API key: \[redacted\]/);
+    assert.match(error.message, /Provider code: invalid_api_key/);
+    assert.match(error.message, /Request ID: req_failure/);
     assert.ok(!error.message.includes('private-secret-test'));
     return true;
   });
   assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('network failures retain nested socket diagnostics and request context', async (t) => {
+  const settings = testConfig('/tmp').llm;
+  settings.base_url = 'http://192.168.0.2:11434/v1';
+  settings.api = 'chat-completions';
+  const socket = Object.assign(
+    new Error('connect ECONNREFUSED 192.168.0.2:11434'),
+    {
+      code: 'ECONNREFUSED',
+      syscall: 'connect',
+      address: '192.168.0.2',
+      port: 11434,
+    },
+  );
+  const fetch = t.mock.method(globalThis, 'fetch', async () => {
+    throw new TypeError('fetch failed', {
+      cause: new AggregateError([socket]),
+    });
+  });
+  const writer = new LlmWriter(settings, new AbortController().signal);
+  await assert.rejects(writer.classify(profile), (error) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /classification failed/);
+    assert.match(
+      error.message,
+      /Connection failed before receiving an HTTP response/,
+    );
+    assert.match(error.message, /192\.168\.0\.2:11434\/v1\/chat\/completions/);
+    assert.match(error.message, /code=ECONNREFUSED/);
+    assert.match(error.message, /address=192\.168\.0\.2; port=11434/);
+    assert.match(error.message, /model: test-model/);
+    assert.match(error.message, /Queue row remains working/);
+    return true;
+  });
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('timeouts and DNS errors have explicit bounded diagnostics without source content', () => {
+  const settings = testConfig('/tmp').llm;
+  const timeout = describeLlmError(
+    new OpenAI.APIConnectionTimeoutError(),
+    settings,
+    'message generation',
+  );
+  assert.match(timeout, /Request timed out/);
+  assert.match(timeout, new RegExp(`${settings.timeout_ms} ms`));
+  const dns = Object.assign(
+    new Error('getaddrinfo ENOTFOUND ollama.internal'),
+    {
+      code: 'ENOTFOUND',
+      hostname: 'ollama.internal',
+    },
+  );
+  assert.match(
+    describeLlmError(
+      new OpenAI.APIConnectionError({ cause: dns }),
+      settings,
+      'classification',
+    ),
+    /hostname=ollama.internal/,
+  );
+  const message = `Bearer secret-token https://user:password@example.com ${settings.api_key} ${profile.text}\u001b\n${'x'.repeat(5000)}`;
+  const safe = describeLlmError(
+    new Error(message),
+    settings,
+    'classification',
+    [profile.text],
+  );
+  for (const secret of [
+    'secret-token',
+    'user:password',
+    settings.api_key,
+    profile.text,
+    '\u001b',
+  ]) {
+    assert.ok(!safe.includes(secret));
+  }
+  assert.ok(safe.length < 4000);
 });
 
 test('incomplete responses and overlong messages stop processing', async (t) => {

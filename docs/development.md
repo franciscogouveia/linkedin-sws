@@ -90,6 +90,13 @@ parameters, or fragments.
 If the server rejects structured output, set `structured_output: false`; invalid
 assessment JSON still stops the run. LLM requests are not automatically retried.
 
+LLM failures report the operation, endpoint, model, HTTP status, provider message,
+and request ID when available. Connection errors include nested network causes
+(for example, `ECONNREFUSED`, `ENOTFOUND`, address, and port); timeouts report the
+configured duration. Diagnostics are bounded and redact the configured API key,
+authorization tokens, and supplied source text. Request bodies and headers are
+not logged. The queue row stays `working` so rerunning resumes it.
+
 Classification uses contextual investor evidence, not a keyword-only check. A
 positive assessment must include an excerpt present in the profile. Uncertain
 assessments become `failed` with `investor status uncertain`. This conservative
