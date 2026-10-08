@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { chromium, type Page } from 'playwright';
 import {
   LinkedInBrowser,
@@ -10,6 +12,8 @@ import {
   profileSlug,
   searchUrl,
 } from '../src/linkedin.ts';
+import { searchLayoutReport } from '../src/search-page.ts';
+import { investor, temporaryDirectory } from './helpers.ts';
 
 test('profile identifiers and keyword searches preserve encoding and reject unrelated URLs', () => {
   assert.equal(profileSlug('/in/alex-example/?tracking=123'), 'alex-example');
@@ -43,6 +47,92 @@ const searchFixture = `<main><ul>
   </li>
   <li><a href="https://evil.example/in/incorrect/">Incorrect</a></li>
 </ul><button aria-label="Next">Next</button></main>`;
+
+const modernSearchFixture = `<div role="main">
+  <nav><a href="/in/account-owner/">Account Owner</a></nav>
+  <div class="result-wrapper">
+    <div class="result-card"><div><a href="/in/alex-example/">Alex Example · 2nd</a></div><p>Angel investor in software</p><button>Connect</button></div>
+    <div class="result-card"><div><a href="/in/blair-example/" aria-label="View Blair Example’s profile"><img alt="Avatar"></a><a href="/in/blair-example/">Blair Example</a></div><p>VC Partner</p><button>Message</button></div>
+  </div>
+  <aside><div><a href="/in/recommendation/">Unrelated Recommendation</a><p>Investor</p></div></aside>
+</div>`;
+
+test('search waits for parsed cards and releases its page handle', async () => {
+  let disposed = false;
+  const main = { count: async () => 1, innerText: async () => 'Results' };
+  const page = {
+    goto: async () => ({ status: () => 200 }),
+    url: () => 'https://www.linkedin.com/search/results/people/',
+    locator: (selector: string) => ({
+      first: () => main,
+      allTextContents: async () => [],
+      count: async () => (selector.includes('a[href') ? 1 : 0),
+    }),
+    waitForFunction: async () => ({
+      jsonValue: async () => ({ kind: 'results', results: [investor] }),
+      dispose: async () => {
+        disposed = true;
+      },
+    }),
+  } as unknown as Page;
+  const rows: string[] = [];
+  const count = await new LinkedInBrowser(
+    page,
+    new AbortController().signal,
+  ).search({ keywords: 'angel', max_results: 1, max_pages: 1 }, (row) => {
+    rows.push(row.slug);
+  });
+  assert.equal(count, 1);
+  assert.deepEqual(rows, [investor.slug]);
+  assert.equal(disposed, true);
+});
+
+test('search parsing timeout saves a layout report and preserves a useful error', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const main = {
+    count: async () => 1,
+    innerText: async () => 'Unrecognized layout',
+  };
+  const report = {
+    path: '/search/results/people/',
+    mainFound: true,
+    profileLinkCount: 3,
+    visibleProfileLinkCount: 2,
+    listItemCount: 0,
+    samples: [],
+  };
+  const page = {
+    goto: async () => ({ status: () => 200 }),
+    url: () => 'https://www.linkedin.com/search/results/people/',
+    locator: () => ({
+      first: () => main,
+      allTextContents: async () => [],
+      count: async () => 1,
+    }),
+    waitForFunction: async () => {
+      throw new Error('Timeout');
+    },
+    evaluate: async () => report,
+  } as unknown as Page;
+  const reader = new LinkedInBrowser(
+    page,
+    new AbortController().signal,
+    directory,
+  );
+  await assert.rejects(
+    reader.search(
+      { keywords: 'angel', max_results: 1, max_pages: 1 },
+      () => {},
+    ),
+    /Cannot parse.*Layout report:.*2 visible profile links/,
+  );
+  const files = await readdir(directory);
+  assert.equal(files.length, 1);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(directory, files[0]!), 'utf8')),
+    report,
+  );
+});
 
 const profileFixture = `<main>
   <section><h1>Alex Example</h1><div>Angel investor in software</div></section>
@@ -83,6 +173,75 @@ test(
         );
         assert.equal(results[0]?.name, 'Alex Example');
         assert.equal(results[0]?.role, 'Angel investor in software');
+      },
+    );
+
+    await t.test(
+      'div-based cards and role-main layouts exclude navigation and recommendations',
+      async () => {
+        fixture = modernSearchFixture;
+        await page.goto('https://www.linkedin.com/search/results/people/');
+        assert.deepEqual(await extractSearchResults(page), [
+          {
+            name: 'Alex Example',
+            role: 'Angel investor in software',
+            slug: 'alex-example',
+          },
+          { name: 'Blair Example', role: 'VC Partner', slug: 'blair-example' },
+        ]);
+      },
+    );
+
+    await t.test(
+      'search waits until delayed headline content has rendered',
+      async () => {
+        fixture = `<main><div><a href="/in/alex-example/">Alex Example</a><p id="headline"></p></div>
+        <script>setTimeout(() => document.querySelector('#headline').textContent = 'Angel investor', 100)</script></main>`;
+        const rows: string[] = [];
+        assert.equal(
+          await new LinkedInBrowser(page, new AbortController().signal).search(
+            { keywords: 'angel', max_results: 1, max_pages: 1 },
+            (row) => {
+              rows.push(row.role);
+            },
+          ),
+          1,
+        );
+        assert.deepEqual(rows, ['Angel investor']);
+      },
+    );
+
+    await t.test(
+      'a profile link wrapping a complete card uses its heading as the name',
+      async () => {
+        fixture =
+          '<main><div><a href="/in/alex-example/"><h3>Alex Example</h3><p>2nd degree</p><p>Angel investor in software</p></a></div></main>';
+        await page.goto('https://www.linkedin.com/search/results/people/');
+        assert.deepEqual(await extractSearchResults(page), [
+          {
+            name: 'Alex Example',
+            role: 'Angel investor in software',
+            slug: 'alex-example',
+          },
+        ]);
+      },
+    );
+
+    await t.test(
+      'layout reports omit profile identifiers, visible names, and search queries',
+      async () => {
+        fixture = modernSearchFixture;
+        await page.goto(
+          'https://www.linkedin.com/search/results/people/?keywords=private-query',
+        );
+        const report = await page.evaluate(searchLayoutReport);
+        assert.equal(report.mainFound, true);
+        assert.ok(report.profileLinkCount >= 2);
+        const serialized = JSON.stringify(report);
+        assert.ok(!serialized.includes('Alex Example'));
+        assert.ok(!serialized.includes('alex-example'));
+        assert.ok(!serialized.includes('private-query'));
+        assert.match(serialized, /result-card/);
       },
     );
 

@@ -1,7 +1,9 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import type { Config } from './config.ts';
 import { ApplicationError } from './errors.ts';
+import { inspectSearchPage, searchLayoutReport } from './search-page.ts';
 import type {
   Investor,
   LinkedInReader,
@@ -39,7 +41,7 @@ const noResultsText =
   /no results found|no matching results|try (?:different|another) keywords/i;
 
 async function pageText(page: Page): Promise<string> {
-  const main = page.locator('main').first();
+  const main = page.locator('main, [role="main"]').first();
   return (await main.count())
     ? main.innerText()
     : page.locator('body').innerText();
@@ -70,7 +72,9 @@ export async function assertLinkedInPage(page: Page): Promise<void> {
     .allTextContents();
   const mainText = await pageText(page);
   const hasProfile = await page
-    .locator('main h1, main a[href*="/in/"]')
+    .locator(
+      'main h1, main a[href*="/in/"], [role="main"] h1, [role="main"] a[href*="/in/"]',
+    )
     .count();
   if (
     notices.some((text) => restrictionText.test(text)) ||
@@ -83,61 +87,8 @@ export async function assertLinkedInPage(page: Page): Promise<void> {
 }
 
 export async function extractSearchResults(page: Page): Promise<Investor[]> {
-  const candidates = await page
-    .locator('main')
-    .first()
-    .evaluate((main) => {
-      const rows: { href: string; name: string; role: string }[] = [];
-      for (const anchor of main.querySelectorAll<HTMLAnchorElement>(
-        'a[href*="/in/"]',
-      )) {
-        if (!anchor.getClientRects().length) continue;
-        const card = anchor.closest<HTMLElement>(
-          '.reusable-search__result-container, [data-view-name="search-entity-result-universal-template"], li',
-        );
-        if (!card) continue;
-        const title =
-          card.querySelector<HTMLElement>('.entity-result__title-text a') ??
-          anchor;
-        const name = (
-          title.querySelector<HTMLElement>('span[aria-hidden="true"]')
-            ?.innerText ?? title.innerText
-        )
-          .replace(/\s+/g, ' ')
-          .trim()
-          .replace(/\s*[•·]\s*(?:1st|2nd|3rd\+?).*$/, '')
-          .trim();
-        const role =
-          card
-            .querySelector<HTMLElement>(
-              '.entity-result__primary-subtitle, [data-anonymize="job-title"]',
-            )
-            ?.innerText.replace(/\s+/g, ' ')
-            .trim() ?? '';
-        if (
-          name &&
-          !/^LinkedIn Member$|^View .* profile$|^\d+ mutual connections?$/i.test(
-            name,
-          )
-        ) {
-          rows.push({
-            href: title instanceof HTMLAnchorElement ? title.href : anchor.href,
-            name,
-            role,
-          });
-        }
-      }
-      return rows;
-    });
-  const seen = new Set<string>();
-  const results: Investor[] = [];
-  for (const candidate of candidates) {
-    const slug = profileSlug(candidate.href);
-    if (!slug || seen.has(slug)) continue;
-    seen.add(slug);
-    results.push({ name: candidate.name, role: candidate.role, slug });
-  }
-  return results;
+  const state = await page.evaluate(inspectSearchPage);
+  return state ? state.results : [];
 }
 
 export async function extractProfile(
@@ -145,7 +96,7 @@ export async function extractProfile(
   slug: string,
 ): Promise<Profile> {
   const data = await page
-    .locator('main')
+    .locator('main, [role="main"]')
     .first()
     .evaluate((main) => {
       const heading = main.querySelector<HTMLElement>('h1');
@@ -184,10 +135,12 @@ export async function extractProfile(
 export class LinkedInBrowser implements LinkedInReader {
   private readonly page: Page;
   private readonly signal: AbortSignal;
+  private readonly diagnosticsDirectory: string | undefined;
 
-  constructor(page: Page, signal: AbortSignal) {
+  constructor(page: Page, signal: AbortSignal, diagnosticsDirectory?: string) {
     this.page = page;
     this.signal = signal;
+    this.diagnosticsDirectory = diagnosticsDirectory;
   }
 
   private async navigate(url: string): Promise<number | undefined> {
@@ -210,17 +163,61 @@ export class LinkedInBrowser implements LinkedInReader {
     return status;
   }
 
-  private async waitForContent(kind: 'search' | 'profile'): Promise<void> {
+  private async searchResults(): Promise<Investor[]> {
+    try {
+      const handle = await this.page.waitForFunction(inspectSearchPage);
+      let state;
+      try {
+        state = await handle.jsonValue();
+      } finally {
+        await handle.dispose();
+      }
+      this.signal.throwIfAborted();
+      await assertLinkedInPage(this.page);
+      return state ? state.results : [];
+    } catch (error) {
+      this.signal.throwIfAborted();
+      if (error instanceof ApplicationError) throw error;
+      await assertLinkedInPage(this.page);
+      let diagnostic = '';
+      if (this.diagnosticsDirectory) {
+        try {
+          const report = await this.page.evaluate(searchLayoutReport);
+          await mkdir(this.diagnosticsDirectory, {
+            recursive: true,
+            mode: 0o700,
+          });
+          const path = join(
+            this.diagnosticsDirectory,
+            `search-layout-${Date.now()}-${process.pid}.json`,
+          );
+          await writeFile(path, JSON.stringify(report, null, 2), {
+            mode: 0o600,
+          });
+          diagnostic = ` Layout report: ${path} (${report.visibleProfileLinkCount} visible profile links).`;
+        } catch {
+          diagnostic = ' A layout report could not be saved.';
+        }
+      }
+      throw new ApplicationError(
+        `Cannot parse LinkedIn search results after waiting for complete cards.${diagnostic} Collected rows are preserved.`,
+      );
+    }
+  }
+
+  private async waitForProfile(): Promise<void> {
     try {
       await this.page.waitForFunction(
-        ({ kind, missing, noResults, restriction }) => {
+        ({ missing, restriction }) => {
           if (
             /\/(?:login|uas\/login|authwall|checkpoint|challenge)(?:\/|$)/i.test(
               location.pathname,
             )
           )
             return true;
-          const main = document.querySelector<HTMLElement>('main');
+          const main = document.querySelector<HTMLElement>(
+            'main, [role="main"]',
+          );
           const text = main?.innerText ?? document.body.innerText;
           if (
             new RegExp(missing, 'i').test(text) ||
@@ -228,15 +225,10 @@ export class LinkedInBrowser implements LinkedInReader {
           )
             return true;
           if (!main) return false;
-          return kind === 'profile'
-            ? !!main.querySelector('h1')
-            : !!main.querySelector('a[href*="/in/"]') ||
-                new RegExp(noResults, 'i').test(text);
+          return !!main.querySelector('h1');
         },
         {
-          kind,
           missing: missingText.source,
-          noResults: noResultsText.source,
           restriction: restrictionText.source,
         },
       );
@@ -259,8 +251,7 @@ export class LinkedInBrowser implements LinkedInReader {
       const status = await this.navigate(searchUrl(criteria.keywords, index));
       if (status === 404)
         throw new ApplicationError('LinkedIn search is unavailable. Stopping.');
-      await this.waitForContent('search');
-      const results = await extractSearchResults(this.page);
+      const results = await this.searchResults();
       if (!results.length) {
         const text = await pageText(this.page);
         if (noResultsText.test(text)) break;
@@ -295,9 +286,12 @@ export class LinkedInBrowser implements LinkedInReader {
       `https://www.linkedin.com/in/${encodeURIComponent(slug)}/`,
     );
     if (status === 404) return null;
-    await this.waitForContent('profile');
+    await this.waitForProfile();
     const text = await pageText(this.page);
-    if (missingText.test(text) && !(await this.page.locator('main h1').count()))
+    if (
+      missingText.test(text) &&
+      !(await this.page.locator('main h1, [role="main"] h1').count())
+    )
       return null;
     const actualSlug = profileSlug(this.page.url());
     if (actualSlug !== slug) {
@@ -365,7 +359,11 @@ export async function openLinkedIn(
     signal.throwIfAborted();
     await assertLinkedInPage(page);
     return {
-      reader: new LinkedInBrowser(page, signal),
+      reader: new LinkedInBrowser(
+        page,
+        signal,
+        join(dirname(settings.session_dir), 'diagnostics'),
+      ),
       close: async () => {
         signal.removeEventListener('abort', onAbort);
         await context.close();

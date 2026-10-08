@@ -113,6 +113,14 @@ Authentication expiry, checkpoints, recognized account warnings, unsupported
 layouts, and LLM failures stop the run while preserving progress. Resolve the
 problem manually, then restart. Do not reset failed rows as part of recovery.
 
+Search waits for complete name-and-headline cards, with bounded fallbacks for
+layouts that do not use the original result classes. If parsing still times out,
+the error names a layout report saved beside the browser session directory
+(normally `data/diagnostics/search-layout-*.json`). It contains link counts and
+element structure, without visible profile text, profile identifiers, search query
+parameters, or browser cookies. Use it to diagnose changed markup. These reports
+are ignored by Git.
+
 Browser layouts can change; local fixture checks cannot establish compatibility
 with your live account. Dry-run mode prevents sending but still automates search
 and profile access. LinkedIn prohibits unauthorized automation and may restrict

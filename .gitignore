@@ -12,4 +12,5 @@ messages.txt
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite.lock/
+**/diagnostics/search-layout-*.json
 
