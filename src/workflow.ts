@@ -44,7 +44,7 @@ export async function runDryRun(options: {
     if (!row) break;
     processed++;
     log(`Analyzing ${terminalText(row.name)} (${terminalText(row.slug)}).`);
-    const profile = await linkedin.readProfile(row.slug);
+    const profile = await linkedin.readProfile(row.slug, row.name);
     signal.throwIfAborted();
     if (!profile) {
       queue.finish(row.id, 'failed', 'invalid slug, profile not found');

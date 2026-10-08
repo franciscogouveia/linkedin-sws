@@ -121,6 +121,14 @@ element structure, without visible profile text, profile identifiers, search que
 parameters, or browser cookies. Use it to diagnose changed markup. These reports
 are ignored by Git.
 
+Profile loading supports visible names in headings, accessible headings, and
+header text matching the queued name. It reads bounded header, About, and
+Experience content rather than requiring `h1` and `section` elements. Profile
+loading failures save `profile-layout-*.json` in the same diagnostics directory,
+recording element structure and whether the queued name was found, without
+storing the name or visible profile text. The selected row stays `working` for
+restart after the problem is resolved.
+
 Browser layouts can change; local fixture checks cannot establish compatibility
 with your live account. Dry-run mode prevents sending but still automates search
 and profile access. LinkedIn prohibits unauthorized automation and may restrict

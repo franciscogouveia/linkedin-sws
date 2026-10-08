@@ -30,7 +30,7 @@ export interface LinkedInReader {
     criteria: SearchCriteria,
     onResult: (investor: Investor) => void,
   ): Promise<number>;
-  readProfile(slug: string): Promise<Profile | null>;
+  readProfile(slug: string, expectedName?: string): Promise<Profile | null>;
 }
 
 export interface Assessment {

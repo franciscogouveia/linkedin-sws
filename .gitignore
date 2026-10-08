@@ -13,4 +13,5 @@ messages.txt
 *.sqlite-wal
 *.sqlite.lock/
 **/diagnostics/search-layout-*.json
+**/diagnostics/profile-layout-*.json
 

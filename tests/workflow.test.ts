@@ -52,7 +52,13 @@ async function setup(t: Parameters<typeof temporaryDirectory>[0]) {
 
 test('dry run generates with profile and startup pitch, prints once, and skips completed rows on rerun', async (t) => {
   const { storage, options, generated, output } = await setup(t);
+  let suppliedName: string | undefined;
+  options.linkedin.readProfile = async (_slug, name) => {
+    suppliedName = name;
+    return profile;
+  };
   const result = await runDryRun(options);
+  assert.equal(suppliedName, investor.name);
   assert.equal(result.displayed, 1);
   assert.deepEqual(generated, [
     { profile: investor.slug, pitch: options.pitch },

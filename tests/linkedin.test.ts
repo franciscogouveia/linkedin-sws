@@ -13,6 +13,7 @@ import {
   searchUrl,
 } from '../src/linkedin.ts';
 import { searchLayoutReport } from '../src/search-page.ts';
+import { profileLayoutReport } from '../src/profile-page.ts';
 import { investor, temporaryDirectory } from './helpers.ts';
 
 test('profile identifiers and keyword searches preserve encoding and reject unrelated URLs', () => {
@@ -134,12 +135,100 @@ test('search parsing timeout saves a layout report and preserves a useful error'
   );
 });
 
+test('profile loading passes the queued name, releases the handle, and bounds returned text', async () => {
+  let suppliedName: string | undefined;
+  let disposed = false;
+  const text = 'Angel investor\n'.repeat(2_000);
+  const main = { count: async () => 1, innerText: async () => text };
+  const page = {
+    goto: async () => ({ status: () => 200 }),
+    url: () => 'https://www.linkedin.com/in/alex-example/',
+    locator: () => ({
+      first: () => main,
+      allTextContents: async () => [],
+      count: async () => 1,
+    }),
+    waitForFunction: async (
+      _callback: unknown,
+      options: { expectedName: string },
+    ) => {
+      suppliedName = options.expectedName;
+      return {
+        jsonValue: async () => ({ kind: 'profile', name: investor.name, text }),
+        dispose: async () => {
+          disposed = true;
+        },
+      };
+    },
+  } as unknown as Page;
+  const result = await new LinkedInBrowser(
+    page,
+    new AbortController().signal,
+  ).readProfile(investor.slug, investor.name);
+  assert.equal(suppliedName, investor.name);
+  assert.equal(disposed, true);
+  assert.equal(result?.name, investor.name);
+  assert.equal(result?.text.length, 24_000);
+  assert.equal(result?.truncated, true);
+});
+
+test('profile timeout records structure and never becomes a missing-profile result', async (t) => {
+  const directory = await temporaryDirectory(t);
+  const main = {
+    count: async () => 1,
+    innerText: async () => 'Unrecognized profile layout',
+  };
+  const report = {
+    path: '/in/<profile>/',
+    mainFound: true,
+    headingCount: 2,
+    visibleHeadingCount: 2,
+    expectedNameFound: true,
+    iframeCount: 0,
+    samples: [],
+  };
+  const page = {
+    goto: async () => ({ status: () => 200 }),
+    url: () => 'https://www.linkedin.com/in/alex-example/',
+    locator: () => ({
+      first: () => main,
+      allTextContents: async () => [],
+      count: async () => 1,
+    }),
+    waitForFunction: async () => {
+      throw new Error('Timeout');
+    },
+    evaluate: async () => report,
+  } as unknown as Page;
+  await assert.rejects(
+    new LinkedInBrowser(
+      page,
+      new AbortController().signal,
+      directory,
+    ).readProfile(investor.slug, investor.name),
+    /Cannot read.*profile-layout-.*Queue row remains working/,
+  );
+  const files = await readdir(directory);
+  assert.equal(files.length, 1);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(directory, files[0]!), 'utf8')),
+    report,
+  );
+});
+
 const profileFixture = `<main>
   <section><h1>Alex Example</h1><div>Angel investor in software</div></section>
   <section><h2>About</h2><p>I invest in early-stage companies.</p></section>
   <section><h2>Experience</h2><p>Angel investor, Example Ventures</p></section>
   <section><h2>People you may know</h2><p>Unrelated person's investment preferences</p></section>
 </main>`;
+
+const modernProfileFixture = `<div role="main">
+  <div class="profile-header"><h2>Alex Example</h2><p>Angel investor in software</p><button>Message</button></div>
+  <div class="profile-card"><div><h2>About</h2></div><p>I invest in early-stage companies.</p></div>
+  <div class="profile-card"><div><h2>Experience</h2></div><p>Angel investor, Example Ventures</p></div>
+  <aside><h2>People you may know</h2><p>Unrelated person's investment preferences</p></aside>
+</div>`;
 
 // Browser fixture checks use no LinkedIn account, API credentials, or real network.
 test(
@@ -254,6 +343,75 @@ test(
         assert.match(profile.text, /early-stage/);
         assert.match(profile.text, /Example Ventures/);
         assert.ok(!profile.text.includes('Unrelated'));
+      },
+    );
+
+    await t.test(
+      'profile supports h2 names and div-based sections',
+      async () => {
+        fixture = modernProfileFixture;
+        await page.goto('https://www.linkedin.com/in/alex-example/');
+        const profile = await extractProfile(
+          page,
+          investor.slug,
+          investor.name,
+        );
+        assert.equal(profile.name, investor.name);
+        assert.match(profile.text, /early-stage/);
+        assert.match(profile.text, /Example Ventures/);
+        assert.ok(!profile.text.includes('Unrelated'));
+      },
+    );
+
+    await t.test(
+      'queued name can identify a plain-text header without a heading element',
+      async () => {
+        fixture = modernProfileFixture.replace(
+          '<h2>Alex Example</h2>',
+          '<p>Alex Example</p>',
+        );
+        await page.goto('https://www.linkedin.com/in/alex-example/');
+        const profile = await extractProfile(
+          page,
+          investor.slug,
+          investor.name,
+        );
+        assert.equal(profile.name, investor.name);
+        assert.match(profile.text, /Angel investor in software/);
+      },
+    );
+
+    await t.test(
+      'profile loading waits for content beyond the name and action buttons',
+      async () => {
+        fixture = `<main><div><h2>Alex Example</h2><button>Message</button><p id="headline"></p></div>
+        <script>setTimeout(() => document.querySelector('#headline').textContent = 'Angel investor in software', 100)</script></main>`;
+        const profile = await new LinkedInBrowser(
+          page,
+          new AbortController().signal,
+        ).readProfile(investor.slug, investor.name);
+        assert.match(profile?.text ?? '', /Angel investor in software/);
+      },
+    );
+
+    await t.test(
+      'profile reports omit queued names, profile identifiers, and visible content',
+      async () => {
+        fixture = modernProfileFixture;
+        await page.goto('https://www.linkedin.com/in/alex-example/');
+        const report = await page.evaluate(profileLayoutReport, {
+          expectedName: investor.name,
+        });
+        assert.equal(report.expectedNameFound, true);
+        const serialized = JSON.stringify(report);
+        for (const value of [
+          'Alex Example',
+          'alex-example',
+          'Example Ventures',
+          'early-stage',
+        ])
+          assert.ok(!serialized.includes(value));
+        assert.match(serialized, /profile-header/);
       },
     );
 
