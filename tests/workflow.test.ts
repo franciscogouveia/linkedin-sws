@@ -134,3 +134,70 @@ test('dry-run output removes terminal escape sequences from scraped and generate
   assert.ok(!output[0]?.includes('\x00'));
   assert.match(output[0] ?? '', /Hello/);
 });
+
+test('a batch processes all five pending profiles and reports queue exhaustion', async (t) => {
+  const { options, storage, output } = await setup(t);
+  options.config.max_profiles_per_run = 10;
+  options.linkedin.search = async (_criteria, onResult) => {
+    for (let i = 0; i < 5; i++)
+      onResult({ ...investor, slug: `investor-${i}` });
+    return 5;
+  };
+  const logs: string[] = [];
+  options.log = (text) => logs.push(text);
+  const result = await runDryRun(options);
+  assert.equal(result.processed, 5);
+  assert.equal(output.length, 5);
+  assert.equal(storage.queue.counts().dryrun, 5);
+  assert.match(logs.join('\n'), /no new or working queue rows remain/);
+});
+
+test('duplicate completed and failed results explain a single-message run without resetting rows', async (t) => {
+  const { options, storage, output } = await setup(t);
+  options.config.max_profiles_per_run = 10;
+  for (let i = 0; i < 4; i++) {
+    storage.queue.append({ ...investor, slug: `old-${i}` });
+    const row = storage.queue.next()!;
+    storage.queue.finish(
+      row.id,
+      i === 0 ? 'failed' : 'dryrun',
+      i === 0 ? 'not an investor' : '',
+    );
+  }
+  options.linkedin.search = async (_criteria, onResult) => {
+    for (let i = 0; i < 4; i++) onResult({ ...investor, slug: `old-${i}` });
+    onResult(investor);
+    return 5;
+  };
+  const logs: string[] = [];
+  options.log = (text) => logs.push(text);
+  const result = await runDryRun(options);
+  assert.equal(result.appended, 1);
+  assert.equal(result.processed, 1);
+  assert.equal(output.length, 1);
+  assert.match(logs.join('\n'), /1 new, 0 working, 3 dryrun, 0 sent, 1 failed/);
+  assert.match(logs.join('\n'), /no new or working queue rows remain/);
+});
+
+test('rejected profiles count toward the limit and the stop summary reports pending rows', async (t) => {
+  const { options, output } = await setup(t);
+  options.config.max_profiles_per_run = 2;
+  options.linkedin.search = async (_criteria, onResult) => {
+    for (let i = 0; i < 5; i++)
+      onResult({ ...investor, slug: `investor-${i}` });
+    return 5;
+  };
+  let classified = 0;
+  options.writer.classify = async () => ({
+    decision: classified++ === 0 ? 'not_investor' : 'investor',
+    evidence: investor.role,
+    reason: 'Test assessment',
+  });
+  const logs: string[] = [];
+  options.log = (text) => logs.push(text);
+  const result = await runDryRun(options);
+  assert.equal(result.processed, 2);
+  assert.equal(output.length, 1);
+  assert.match(logs.join('\n'), /1 failed this run; 3 pending/);
+  assert.match(logs.join('\n'), /Stopped at max_profiles_per_run \(2\)/);
+});

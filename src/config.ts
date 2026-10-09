@@ -9,7 +9,12 @@ const configSchema = z.strictObject({
   mode: z.literal('dryrun'),
   pitch_path: nonempty,
   queue_path: nonempty,
-  max_profiles_per_run: z.number().int().min(1).max(10).default(1),
+  max_profiles_per_run: z
+    .number()
+    .int()
+    .min(1)
+    .max(Number.MAX_SAFE_INTEGER)
+    .default(1),
   search: z.strictObject({
     keywords: nonempty.max(500),
     max_results: z.number().int().min(1).max(50).default(5),

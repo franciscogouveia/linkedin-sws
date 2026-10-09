@@ -46,7 +46,7 @@ The complete example is [config.example.yaml](../config.example.yaml).
 | `search.keywords`                                  | Keywords for ordinary LinkedIn people search, including supported Boolean syntax.                                                    |
 | `search.max_results`                               | Maximum unique profiles collected per run; default 5, maximum 50.                                                                    |
 | `search.max_pages`                                 | Maximum search pages visited; default 1, maximum 10.                                                                                 |
-| `max_profiles_per_run`                             | Maximum queued profiles processed; default 1, maximum 10.                                                                            |
+| `max_profiles_per_run`                             | Maximum queued profiles attempted per run; positive integer, default 1, no prototype cap. Rejected profiles count toward this limit. |
 | `pitch_path`, `queue_path`                         | Markdown source and SQLite database paths.                                                                                           |
 | `linkedin.session_dir`                             | Dedicated local browser profile directory.                                                                                           |
 | `linkedin.timeout_ms`, `linkedin.login_timeout_ms` | Page timeout and manual-login timeout.                                                                                               |

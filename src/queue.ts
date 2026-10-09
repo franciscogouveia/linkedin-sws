@@ -3,7 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import lockfile from 'proper-lockfile';
 import { ApplicationError } from './errors.ts';
-import type { Investor, QueueRow } from './types.ts';
+import type { Investor, QueueRow, QueueStatus } from './types.ts';
 
 export class Queue {
   private readonly database: DatabaseSync;
@@ -73,6 +73,15 @@ export class Queue {
         'The selected queue row is no longer working. Stopping.',
       );
     }
+  }
+
+  counts(): Record<QueueStatus, number> {
+    const counts = { new: 0, working: 0, sent: 0, failed: 0, dryrun: 0 };
+    const groups = this.database
+      .prepare('SELECT status, COUNT(*) AS count FROM queue GROUP BY status')
+      .all() as unknown as { status: QueueStatus; count: number }[];
+    for (const group of groups) counts[group.status] = group.count;
+    return counts;
   }
 
   rows(): QueueRow[] {

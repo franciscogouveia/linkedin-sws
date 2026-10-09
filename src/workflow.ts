@@ -35,6 +35,10 @@ export async function runDryRun(options: {
   log(
     `Search collected ${discovered} profile(s); appended ${appended} new queue row(s).`,
   );
+  const initial = queue.counts();
+  log(
+    `Queue: ${initial.new} new, ${initial.working} working, ${initial.dryrun} dryrun, ${initial.sent} sent, ${initial.failed} failed. Processing limit: ${config.max_profiles_per_run}. Completed and failed rows are skipped.`,
+  );
 
   let processed = 0;
   let displayed = 0;
@@ -74,8 +78,15 @@ export async function runDryRun(options: {
     queue.finish(row.id, 'dryrun');
     displayed++;
   }
+  const final = queue.counts();
+  const pending = final.new + final.working;
   log(
-    `Dry run finished: ${processed} processed, ${displayed} message(s) displayed.`,
+    `Dry run finished: ${processed} processed, ${displayed} message(s) displayed, ${processed - displayed} failed this run; ${pending} pending.`,
+  );
+  log(
+    pending === 0
+      ? 'Stopped because no new or working queue rows remain.'
+      : `Stopped at max_profiles_per_run (${config.max_profiles_per_run}); rerun to process remaining rows.`,
   );
   return { discovered, appended, processed, displayed };
 }

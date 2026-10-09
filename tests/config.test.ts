@@ -26,6 +26,19 @@ test('configuration rejects live mode, unsupported filters, duplicate keys, and 
   }
 });
 
+test('processing limits above ten are accepted but must be positive safe integers', () => {
+  const text = `${configYaml}\nmax_profiles_per_run: 100`;
+  assert.equal(parseConfig(text, '/tmp/config.yaml').max_profiles_per_run, 100);
+  for (const value of ['0', '-1', '1.5', '9007199254740992']) {
+    assert.throws(() =>
+      parseConfig(
+        `${configYaml}\nmax_profiles_per_run: ${value}`,
+        '/tmp/config.yaml',
+      ),
+    );
+  }
+});
+
 test('configuration permits Ollama over HTTP on loopback, LAN addresses, and hostnames', () => {
   for (const endpoint of [
     'http://localhost:11434/v1/',
