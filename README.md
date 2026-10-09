@@ -2,6 +2,10 @@
 
 **This tool is a proof of concept (PoC). Using it may lead to your LinkedIn account being restricted or suspended.** Automated browsing and outreach may violate LinkedIn's terms. Dry-run mode still automates access to LinkedIn and carries this risk. Use at your own risk.
 
+This is a fun experiment and proof of concept that leverages LLMs to post-filter search results by validating that the profile is of an investor and then generating a message asking for funding.
+
+For now, only dry-run is implemented, so the messages will simply be printed on the terminal instead of actually being sent.
+
 # LinkedIn Search-Write-Send
 
 LinkedIn Search-Write-Send automates personalized outreach for founders seeking angel investment. It brings investor discovery, pitch writing, and message delivery into a single workflow on LinkedIn.
