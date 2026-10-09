@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
-import { openQueue } from '../src/storage/queue.ts';
+import { openQueue } from '../src/infrastructure/storage/queue.ts';
 import { runDryRun } from '../src/app/workflow.ts';
 import { runSearch } from '../src/search/workflow.ts';
 import { runMessages } from '../src/writing/workflow.ts';

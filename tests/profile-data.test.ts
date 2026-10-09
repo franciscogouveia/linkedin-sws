@@ -5,7 +5,6 @@ import { profileData } from '../src/writing/profile-data.ts';
 test('a long About section cannot displace the headline or venture-capital Experience', () => {
   const result = profileData(
     {
-      kind: 'profile',
       name: 'Example Person',
       text: '',
       sections: {
@@ -33,15 +32,11 @@ test('section budgets bound all source fields while retaining full short profile
     about: '',
     experience: 'Startup investing',
   };
-  const short = profileData(
-    { kind: 'profile', name: 'Example', text: '', sections },
-    'example',
-  );
+  const short = profileData({ name: 'Example', text: '', sections }, 'example');
   assert.deepEqual(short.sections, sections);
   assert.equal(short.truncated, false);
   const long = profileData(
     {
-      kind: 'profile',
       name: 'Example',
       text: '',
       sections: {

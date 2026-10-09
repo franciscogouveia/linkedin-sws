@@ -1,13 +1,11 @@
-import OpenAI from 'openai';
 import { z } from 'zod';
-import type { Config } from '../shared/config.ts';
 import { ApplicationError } from '../shared/errors.ts';
-import { describeLlmError } from './llm-error.ts';
 import type {
   Assessment,
   OutreachContext,
   PitchWriter,
   Profile,
+  TextGenerator,
 } from '../shared/types.ts';
 
 const assessmentSchema = z.strictObject({
@@ -80,19 +78,12 @@ export function parseAssessment(text: string, profile: Profile): Assessment {
 }
 
 export class LlmWriter implements PitchWriter {
-  private readonly client: OpenAI;
-  private readonly settings: Config['llm'];
-  private readonly signal: AbortSignal;
+  private readonly generator: TextGenerator;
+  private readonly maxMessageCharacters: number;
 
-  constructor(settings: Config['llm'], signal: AbortSignal) {
-    this.settings = settings;
-    this.signal = signal;
-    this.client = new OpenAI({
-      apiKey: settings.api_key,
-      baseURL: settings.base_url,
-      timeout: settings.timeout_ms,
-      maxRetries: 0,
-    });
+  constructor(generator: TextGenerator, maxMessageCharacters: number) {
+    this.generator = generator;
+    this.maxMessageCharacters = maxMessageCharacters;
   }
 
   private async request(
@@ -100,102 +91,34 @@ export class LlmWriter implements PitchWriter {
     input: string,
     classification = false,
   ): Promise<string> {
-    this.signal.throwIfAborted();
-    try {
-      let text: string;
-      if (this.settings.api === 'responses') {
-        const response = await this.client.responses.create(
-          {
-            model: this.settings.model,
-            instructions,
-            input,
-            store: false,
-            max_output_tokens: this.settings.max_output_tokens,
-            ...(classification && this.settings.structured_output
-              ? {
-                  text: {
-                    format: {
-                      type: 'json_schema',
-                      name: 'investor_assessment',
-                      strict: true,
-                      schema: classificationFormat,
-                    },
-                  },
-                }
-              : {}),
-          },
-          { signal: this.signal },
-        );
-        if (response.status !== 'completed') {
-          throw new ApplicationError(
-            'The LLM response was incomplete. Check the model and output token budget.',
-          );
-        }
-        text = response.output_text;
-      } else {
-        const response = await this.client.chat.completions.create(
-          {
-            model: this.settings.model,
-            store: false,
-            messages: [
-              { role: 'system', content: instructions },
-              { role: 'user', content: input },
-            ],
-            max_completion_tokens: this.settings.max_output_tokens,
-            ...(classification && this.settings.structured_output
-              ? {
-                  response_format: {
-                    type: 'json_schema',
-                    json_schema: {
-                      name: 'investor_assessment',
-                      strict: true,
-                      schema: classificationFormat,
-                    },
-                  },
-                }
-              : {}),
-          },
-          { signal: this.signal },
-        );
-        const choice = response.choices[0];
-        if (choice?.finish_reason !== 'stop' || choice.message.refusal) {
-          throw new ApplicationError(
-            'The LLM did not complete the requested text. Check the model and output token budget.',
-          );
-        }
-        text = choice.message.content ?? '';
-      }
-      if (!text.trim())
-        throw new ApplicationError('The LLM returned no usable text.');
-      return text.trim();
-    } catch (error) {
-      if (this.signal.aborted) throw this.signal.reason;
-      if (error instanceof ApplicationError) throw error;
-      const source = JSON.parse(input) as {
-        pitch?: string;
-        profile: Profile;
-        outreach?: OutreachContext;
-      };
-      throw new ApplicationError(
-        describeLlmError(
-          error,
-          this.settings,
-          classification ? 'classification' : 'message generation',
-          [
-            input,
-            instructions,
-            source.pitch ?? '',
-            source.profile.name,
-            source.profile.slug,
-            source.profile.text,
-            source.profile.searchRole ?? '',
-            ...Object.values(source.outreach ?? {}).filter(
-              (value): value is string => typeof value === 'string',
-            ),
-          ],
+    const source = JSON.parse(input) as {
+      pitch?: string;
+      profile: Profile;
+      outreach?: OutreachContext;
+    };
+    return this.generator.request({
+      instructions,
+      input,
+      operation: classification ? 'classification' : 'message generation',
+      redactions: [
+        source.pitch ?? '',
+        source.profile.name,
+        source.profile.slug,
+        source.profile.text,
+        source.profile.searchRole ?? '',
+        ...Object.values(source.outreach ?? {}).filter(
+          (value): value is string => typeof value === 'string',
         ),
-      );
-    }
+      ],
+      ...(classification
+        ? {
+            format: {
+              name: 'investor_assessment',
+              schema: classificationFormat,
+            },
+          }
+        : {}),
+    });
   }
 
   async classify(profile: Profile): Promise<Assessment> {
@@ -223,7 +146,7 @@ Only call an example "your investment" if the profile explicitly attributes inve
 Do not invent portfolio companies, look up outside facts, or imply an example guarantees interest. If there is no supported relevant investment example, use a supported sector/role connection or a direct business-focused pitch. Avoid generic claims such as "you often invest in bold ideas" without source evidence.
 Include a clear, low-pressure request to discuss the investment opportunity. Use natural, professional language.
 Return only the message text, without commentary, Markdown fences, or a subject line.
-Aim for 80 to 150 words, with a hard maximum of ${this.settings.max_message_characters} characters.`;
+Aim for 80 to 150 words, with a hard maximum of ${this.maxMessageCharacters} characters.`;
     const message = plainMessageLinks(
       await this.request(
         instructions,
@@ -239,7 +162,7 @@ Aim for 80 to 150 words, with a hard maximum of ${this.settings.max_message_char
         'The generated message contains unresolved placeholders. Fill in outreach context in config.yaml or clarify pitch.md, then rerun. Queue row remains working.',
       );
     }
-    if (message.length > this.settings.max_message_characters) {
+    if (message.length > this.maxMessageCharacters) {
       throw new ApplicationError(
         'The generated message exceeded max_message_characters. Queue row remains working.',
       );

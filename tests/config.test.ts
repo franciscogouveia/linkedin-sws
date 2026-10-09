@@ -6,7 +6,7 @@ import {
   loadConfiguration,
   loadStartup,
   parseConfig,
-} from '../src/shared/config.ts';
+} from '../src/app/config.ts';
 import { configYaml, temporaryDirectory } from './helpers.ts';
 
 test('configuration resolves paths against its location and sets small prototype limits', () => {

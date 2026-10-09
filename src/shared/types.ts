@@ -1,5 +1,3 @@
-import type { Config } from './config.ts';
-
 export interface Investor {
   name: string;
   role: string;
@@ -52,4 +50,31 @@ export interface PitchWriter {
   ): Promise<string>;
 }
 
-export type OutreachContext = Config['outreach'];
+export interface OutreachContext {
+  founder_name?: string | undefined;
+  founder_role?: string | undefined;
+  business_name?: string | undefined;
+  industry?: string | undefined;
+  funding_stage?: string | undefined;
+  funding_ask?: string | undefined;
+  website?: string | undefined;
+}
+
+export interface QueueStore {
+  append(investor: Investor): boolean;
+  next(): QueueRow | undefined;
+  finish(id: number, status: 'failed' | 'dryrun', failure?: string): void;
+  counts(): Record<QueueStatus, number>;
+}
+
+export interface TextRequest {
+  instructions: string;
+  input: string;
+  operation: 'classification' | 'message generation';
+  redactions: string[];
+  format?: { name: string; schema: Record<string, unknown> };
+}
+
+export interface TextGenerator {
+  request(request: TextRequest): Promise<string>;
+}

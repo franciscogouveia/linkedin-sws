@@ -1,14 +1,47 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import OpenAI from 'openai';
+import { OpenAITextClient } from '../src/infrastructure/llm/client.ts';
 import {
   LlmWriter,
   parseAssessment,
   hasMessagePlaceholders,
   plainMessageLinks,
 } from '../src/writing/llm.ts';
-import { describeLlmError } from '../src/writing/llm-error.ts';
+import { describeLlmError } from '../src/infrastructure/llm/errors.ts';
 import { profile, testConfig } from './helpers.ts';
+import type { TextRequest } from '../src/shared/types.ts';
+
+test('domain writing can classify and generate through an injected text generator', async () => {
+  const requests: TextRequest[] = [];
+  const writer = new LlmWriter(
+    {
+      request: async (request) => {
+        requests.push(request);
+        return request.operation === 'classification'
+          ? JSON.stringify({
+              decision: 'investor',
+              evidence: 'I invest in early-stage software companies.',
+              reason: 'Explicit investing.',
+            })
+          : 'Hello Alex, could we discuss funding Acme? Sam';
+      },
+    },
+    1500,
+  );
+  assert.equal((await writer.classify(profile)).decision, 'investor');
+  assert.equal(
+    await writer.write(profile, 'Our verified pitch', {
+      founder_name: 'Sam',
+      business_name: 'Acme',
+    }),
+    'Hello Alex, could we discuss funding Acme? Sam',
+  );
+  assert.equal(requests[0]?.format?.name, 'investor_assessment');
+  assert.equal(requests[1]?.format, undefined);
+  assert.equal(JSON.parse(requests[1]!.input).outreach.business_name, 'Acme');
+  assert.ok(requests[1]?.redactions.includes('Our verified pitch'));
+});
 
 test('investor classification requires a quoted source excerpt and validates the entire response', () => {
   const supported = parseAssessment(
@@ -127,7 +160,7 @@ test('classification sends the queued headline and labeled section data without 
     },
     text: 'HEADER\nTech PR | Angel Investor\n\nEXPERIENCE\nStartup investing',
   };
-  const writer = new LlmWriter(
+  const writer = createWriter(
     testConfig('/tmp').llm,
     new AbortController().signal,
   );
@@ -186,7 +219,7 @@ test('message requests contain configured founder facts, the business pitch, and
         ...profile,
         text: 'Angel Investor\nI invested in ClinicTools, which provides software for clinics.',
       };
-      const writer = new LlmWriter(settings, new AbortController().signal);
+      const writer = createWriter(settings, new AbortController().signal);
       await writer.write(
         source,
         'We automate scheduling for clinics.',
@@ -250,7 +283,7 @@ test('link wrappers become plain URLs without altering the URL or the rest of th
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
   );
-  const writer = new LlmWriter(
+  const writer = createWriter(
     testConfig('/tmp').llm,
     new AbortController().signal,
   );
@@ -277,7 +310,7 @@ test('a generated placeholder stops processing rather than being accepted as a f
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
   );
-  const writer = new LlmWriter(
+  const writer = createWriter(
     testConfig('/tmp').llm,
     new AbortController().signal,
   );
@@ -311,7 +344,7 @@ test('Responses requests include source context, disable storage, and validate g
       );
     },
   );
-  const writer = new LlmWriter(
+  const writer = createWriter(
     testConfig('/tmp').llm,
     new AbortController().signal,
   );
@@ -361,7 +394,7 @@ test('chat-completions endpoint is available for compatible local providers', as
       );
     },
   );
-  const writer = new LlmWriter(settings, new AbortController().signal);
+  const writer = createWriter(settings, new AbortController().signal);
   assert.equal((await writer.classify(profile)).decision, 'uncertain');
   assert.ok(Array.isArray(request?.messages));
   assert.equal(request?.response_format, undefined);
@@ -391,7 +424,7 @@ test('HTTP failures expose provider diagnostics, redact the key, and do not retr
         },
       ),
   );
-  const writer = new LlmWriter(settings, new AbortController().signal);
+  const writer = createWriter(settings, new AbortController().signal);
   await assert.rejects(writer.classify(profile), (error) => {
     assert.ok(error instanceof Error);
     assert.match(error.message, /HTTP 401/);
@@ -422,7 +455,7 @@ test('network failures retain nested socket diagnostics and request context', as
       cause: new AggregateError([socket]),
     });
   });
-  const writer = new LlmWriter(settings, new AbortController().signal);
+  const writer = createWriter(settings, new AbortController().signal);
   await assert.rejects(writer.classify(profile), (error) => {
     assert.ok(error instanceof Error);
     assert.match(error.message, /classification failed/);
@@ -494,7 +527,7 @@ test('incomplete responses and overlong messages stop processing', async (t) => 
           headers: { 'Content-Type': 'application/json' },
         }),
     );
-    const writer = new LlmWriter(
+    const writer = createWriter(
       testConfig('/tmp').llm,
       new AbortController().signal,
     );
@@ -510,10 +543,20 @@ test('incomplete responses and overlong messages stop processing', async (t) => 
           headers: { 'Content-Type': 'application/json' },
         }),
     );
-    const writer = new LlmWriter(
+    const writer = createWriter(
       testConfig('/tmp').llm,
       new AbortController().signal,
     );
     await assert.rejects(writer.write(profile, 'Pitch'), /exceeded/);
   });
 });
+
+function createWriter(
+  settings: ReturnType<typeof testConfig>['llm'],
+  signal: AbortSignal,
+) {
+  return new LlmWriter(
+    new OpenAITextClient(settings, signal),
+    settings.max_message_characters,
+  );
+}

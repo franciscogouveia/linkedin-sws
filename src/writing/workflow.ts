@@ -1,14 +1,21 @@
 import { ApplicationError } from '../shared/errors.ts';
-import type { Config } from '../shared/config.ts';
-import type { Queue } from '../storage/queue.ts';
-import type { LinkedInReader, PitchWriter } from '../shared/types.ts';
+import type {
+  LinkedInReader,
+  PitchWriter,
+  QueueStore,
+  OutreachContext,
+} from '../shared/types.ts';
 import { terminalText } from '../communication/terminal.ts';
 import { displayMessage } from '../communication/delivery.ts';
 
 export interface MessageOptions {
-  config: Config;
+  config: {
+    mode: 'dryrun';
+    max_profiles_per_run: number;
+    outreach: OutreachContext;
+  };
   pitch: string;
-  queue: Queue;
+  queue: QueueStore;
   linkedin: Pick<LinkedInReader, 'readProfile'>;
   writer: PitchWriter;
   output: (text: string) => Promise<void>;

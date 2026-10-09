@@ -1,10 +1,12 @@
-import type { Config } from '../shared/config.ts';
-import type { Queue } from '../storage/queue.ts';
-import type { LinkedInReader } from '../shared/types.ts';
+import type {
+  LinkedInReader,
+  SearchCriteria,
+  QueueStore,
+} from '../shared/types.ts';
 
 export interface SearchOptions {
-  config: Config;
-  queue: Queue;
+  config: { search: SearchCriteria };
+  queue: Pick<QueueStore, 'append'>;
   linkedin: Pick<LinkedInReader, 'search'>;
   log: (text: string) => void;
   signal: AbortSignal;

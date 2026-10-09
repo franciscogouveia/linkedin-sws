@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
 import { z } from 'zod';
-import { ApplicationError } from './errors.ts';
+import { ApplicationError } from '../shared/errors.ts';
 
 const nonempty = z.string().trim().min(1);
 const configSchema = z.strictObject({

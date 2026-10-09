@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { openQueue } from '../src/storage/queue.ts';
+import { openQueue } from '../src/infrastructure/storage/queue.ts';
 import { investor, temporaryDirectory } from './helpers.ts';
 
 test('queue persists completed statuses, deduplicates slugs, and preserves original details', async (t) => {
