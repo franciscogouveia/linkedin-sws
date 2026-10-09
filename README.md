@@ -40,3 +40,7 @@ These files let founders express whom they want to reach and what they want to c
 ## Scope
 
 The product focuses on founders seeking angel investment, with LinkedIn as its only platform. Other outreach use cases may be considered in the future and are outside the current scope.
+
+## License
+
+Licensed under the [MIT License](LICENSE). Copyright (c) 2026 Francisco de Gouveia.

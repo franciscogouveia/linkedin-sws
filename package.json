@@ -2,6 +2,7 @@
   "name": "linkedin-search-write-send",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Local LinkedIn investor discovery and personalized pitch prototype",
   "type": "module",
   "engines": {
