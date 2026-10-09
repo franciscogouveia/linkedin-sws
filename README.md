@@ -10,6 +10,8 @@ For now, only dry-run is implemented, so the messages will simply be printed on 
 
 LinkedIn Search-Write-Send automates personalized outreach for founders seeking angel investment. It brings investor discovery, pitch writing, and message delivery into a single workflow on LinkedIn.
 
+Example [here](example/).
+
 ## Product Vision
 
 Give founders a simple way to turn their investor criteria and business story into personalized funding conversations. The founder defines who to approach and supplies the pitch context; the product searches for angel investors, generates a message for each person, and sends those messages as direct messages on LinkedIn.

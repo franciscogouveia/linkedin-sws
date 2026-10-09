@@ -15,3 +15,5 @@ messages.txt
 **/diagnostics/search-layout-*.json
 **/diagnostics/profile-layout-*.json
 
+!example/pitch.md
+!example/config.yaml
