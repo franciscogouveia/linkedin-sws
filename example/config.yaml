@@ -1,0 +1,36 @@
+# Copy to config.yaml. All application settings live here; the CLI takes no arguments.
+mode: dryrun
+pitch_path: pitch.md
+queue_path: data/queue.sqlite
+max_profiles_per_run: 10
+
+search:
+  keywords: '"angel investor"'
+  max_results: 30
+  max_pages: 10
+
+linkedin:
+  session_dir: data/browser
+  timeout_ms: 30000
+  login_timeout_ms: 300000
+
+llm:
+  provider: openai-compatible
+  base_url: http://192.168.0.XXX:11434/v1 # URL to provider, in my case, Ollama instance
+  model: gemma4:e4b
+  api_key: ollama
+  api: chat-completions
+  structured_output: true
+  timeout_ms: 60000
+  max_output_tokens: 2048
+  max_message_characters: 1500
+
+outreach:
+  founder_name: Francisco de Gouveia
+  founder_role: Co-Founder and CTO
+  business_name: Useless Waste
+  industry: C2B Software
+  funding_stage: pre-seed
+  funding_ask: Raising billions of euros
+  website: https://de-gouveia.eu
+
