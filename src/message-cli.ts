@@ -1,3 +1,3 @@
 import { startCli } from './cli-runner.ts';
 
-startCli('all');
+startCli('message');

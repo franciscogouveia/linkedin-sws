@@ -11,7 +11,7 @@ export function terminalText(value: string): string {
   );
 }
 
-export async function runDryRun(options: {
+interface WorkflowOptions {
   config: Config;
   pitch: string;
   queue: Queue;
@@ -20,12 +20,15 @@ export async function runDryRun(options: {
   output: (text: string) => Promise<void>;
   log: (text: string) => void;
   signal: AbortSignal;
-}) {
-  const { config, pitch, queue, linkedin, writer, output, log, signal } =
-    options;
-  if (config.mode !== 'dryrun') {
-    throw new ApplicationError('This prototype only supports mode: dryrun.');
-  }
+}
+
+export async function runSearch(
+  options: Pick<
+    WorkflowOptions,
+    'config' | 'queue' | 'linkedin' | 'log' | 'signal'
+  >,
+) {
+  const { config, queue, linkedin, log, signal } = options;
   let appended = 0;
   signal.throwIfAborted();
   const discovered = await linkedin.search(config.search, (investor) => {
@@ -35,6 +38,15 @@ export async function runDryRun(options: {
   log(
     `Search collected ${discovered} profile(s); appended ${appended} new queue row(s).`,
   );
+  return { discovered, appended };
+}
+
+export async function runMessages(options: WorkflowOptions) {
+  const { config, pitch, queue, linkedin, writer, output, log, signal } =
+    options;
+  if (config.mode !== 'dryrun') {
+    throw new ApplicationError('This prototype only supports mode: dryrun.');
+  }
   const initial = queue.counts();
   log(
     `Queue: ${initial.new} new, ${initial.working} working, ${initial.dryrun} dryrun, ${initial.sent} sent, ${initial.failed} failed. Processing limit: ${config.max_profiles_per_run}. Completed and failed rows are skipped.`,
@@ -97,5 +109,14 @@ export async function runDryRun(options: {
       ? 'Stopped because no new or working queue rows remain.'
       : `Stopped at max_profiles_per_run (${config.max_profiles_per_run}); rerun to process remaining rows.`,
   );
-  return { discovered, appended, processed, displayed };
+  return { processed, displayed };
+}
+
+export async function runDryRun(options: WorkflowOptions) {
+  if (options.config.mode !== 'dryrun') {
+    throw new ApplicationError('This prototype only supports mode: dryrun.');
+  }
+  const search = await runSearch(options);
+  const messages = await runMessages(options);
+  return { ...search, ...messages };
 }

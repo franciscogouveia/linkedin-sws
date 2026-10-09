@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
 import { openQueue } from '../src/queue.ts';
-import { runDryRun } from '../src/workflow.ts';
+import { runDryRun, runSearch, runMessages } from '../src/workflow.ts';
 import type { LinkedInReader, PitchWriter } from '../src/types.ts';
 import {
   investor,
@@ -49,6 +49,35 @@ async function setup(t: Parameters<typeof temporaryDirectory>[0]) {
   };
   return { storage, options, generated, output };
 }
+
+test('search-only appends and deduplicates profiles without analyzing or generating messages', async (t) => {
+  const { options, storage, output } = await setup(t);
+  const unexpected = async (): Promise<never> => {
+    throw new Error('Search must not process profiles');
+  };
+  options.linkedin.readProfile = unexpected;
+  options.writer.classify = unexpected;
+  options.writer.write = unexpected;
+  assert.deepEqual(await runSearch(options), { discovered: 1, appended: 1 });
+  assert.deepEqual(await runSearch(options), { discovered: 1, appended: 0 });
+  assert.equal(storage.queue.rows()[0]?.status, 'new');
+  assert.equal(output.length, 0);
+});
+
+test('message-only resumes the persisted queue without searching or adding new rows', async (t) => {
+  const { options, storage, output } = await setup(t);
+  await runSearch(options);
+  const selected = storage.queue.next();
+  assert.equal(selected?.status, 'working');
+  options.linkedin.search = async () => {
+    throw new Error('Message stage must not search');
+  };
+  assert.deepEqual(await runMessages(options), { processed: 1, displayed: 1 });
+  assert.equal(storage.queue.rows().length, 1);
+  assert.equal(storage.queue.rows()[0]?.status, 'dryrun');
+  assert.deepEqual(await runMessages(options), { processed: 0, displayed: 0 });
+  assert.equal(output.length, 1);
+});
 
 test('dry run generates with profile and startup pitch, prints once, and skips completed rows on rerun', async (t) => {
   const { storage, options, generated, output } = await setup(t);

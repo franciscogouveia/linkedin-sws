@@ -9,9 +9,13 @@
   },
   "scripts": {
     "dev": "node src/cli.ts",
+    "dev:search": "node src/search-cli.ts",
+    "dev:message": "node src/message-cli.ts",
     "queue:reset-dryruns": "node src/reset-dryruns.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/cli.js",
+    "start:search": "node dist/search-cli.js",
+    "start:message": "node dist/message-cli.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-isolation=none tests/*.test.ts",
     "format": "prettier --write .",

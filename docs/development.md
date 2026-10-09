@@ -54,14 +54,31 @@ business pitch. Review generated messages for factual accuracy.
 npm run dev
 ```
 
-The application takes no arguments and reads `config.yaml` from the working
+To run discovery separately from profile analysis and message generation:
+
+```bash
+npm run dev:search
+npm run dev:message
+```
+
+`dev:search` appends matching profiles to the persisted queue, deduplicating by
+slug. It does not analyze profiles, load the pitch, or call the LLM.
+`dev:message` processes existing `working` and `new` rows up to
+`max_profiles_per_run`, without running a search. It reads investor profiles,
+classifies them, and prints generated messages in dry-run mode. Both commands use
+the same configuration, queue lock, and browser session. An empty message queue
+exits without opening the browser. `npm run dev` still runs both stages together.
+After `npm run build`, use `npm run start:search` and `npm run start:message` for
+the compiled versions.
+
+The commands take no arguments and read `config.yaml` from the working
 directory. Relative file paths resolve against that file. On first use, sign in
 manually in the Chromium window. The browser session is reused from
 `linkedin.session_dir`; the application does not collect your password. Use an
 English LinkedIn interface for this initial extraction implementation.
 
 Generated messages go to standard output; progress and errors go to standard
-error. Redirect messages with `npm run dev --silent > messages.txt` if desired.
+error. Redirect messages with `npm run dev:message --silent > messages.txt` if desired.
 Do not commit that file if it contains personal information or private pitches.
 
 ## Configuration
@@ -70,7 +87,7 @@ To regenerate messages for previously completed dry runs:
 
 ```bash
 npm run queue:reset-dryruns
-npm run dev
+npm run dev:message
 ```
 
 The reset command reads `queue_path` from `config.yaml` and changes only `dryrun`

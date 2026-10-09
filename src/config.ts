@@ -104,7 +104,7 @@ export function parseConfig(text: string, configPath: string): Config {
   return config;
 }
 
-export async function loadStartup(configPath = resolve('config.yaml')) {
+export async function loadConfiguration(configPath = resolve('config.yaml')) {
   let text: string;
   try {
     text = await readFile(configPath, 'utf8');
@@ -113,7 +113,11 @@ export async function loadStartup(configPath = resolve('config.yaml')) {
       'Cannot read config.yaml. Copy config.example.yaml to config.yaml and edit it first.',
     );
   }
-  const config = parseConfig(text, configPath);
+  return parseConfig(text, configPath);
+}
+
+export async function loadStartup(configPath = resolve('config.yaml')) {
+  const config = await loadConfiguration(configPath);
   let pitch: string;
   try {
     pitch = await readFile(config.pitch_path, 'utf8');

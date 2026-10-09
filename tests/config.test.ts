@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { writeFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { loadStartup, parseConfig } from '../src/config.ts';
+import { loadConfiguration, loadStartup, parseConfig } from '../src/config.ts';
 import { configYaml, temporaryDirectory } from './helpers.ts';
 
 test('configuration resolves paths against its location and sets small prototype limits', () => {
@@ -123,6 +123,10 @@ test('startup loads the pitch once and does not create storage on an invalid sta
   const directory = await temporaryDirectory(t);
   const configPath = join(directory, 'config.yaml');
   await writeFile(configPath, configYaml);
+  assert.equal(
+    (await loadConfiguration(configPath)).pitch_path,
+    join(directory, 'pitch.md'),
+  );
   await assert.rejects(loadStartup(configPath), /Markdown/);
   await assert.rejects(access(join(directory, 'data')));
   await writeFile(join(directory, 'pitch.md'), 'Original pitch');
