@@ -135,6 +135,34 @@ test('dry-run output removes terminal escape sequences from scraped and generate
   assert.match(output[0] ?? '', /Hello/);
 });
 
+test('classification receives the search role and logs the decision reason and extracted data sizes', async (t) => {
+  const { options } = await setup(t);
+  options.linkedin.readProfile = async () => ({
+    ...profile,
+    sections: {
+      header: 'Alex Example\nAngel Investor',
+      about: '',
+      experience: '',
+    },
+  });
+  options.writer.classify = async (candidate) => {
+    assert.equal(candidate.searchRole, investor.role);
+    return {
+      decision: 'uncertain',
+      evidence: '',
+      reason: 'Missing current investment evidence.',
+    };
+  };
+  const logs: string[] = [];
+  options.log = (text) => logs.push(text);
+  await runDryRun(options);
+  assert.match(logs.join('\n'), /About 0, Experience 0 characters/);
+  assert.match(
+    logs.join('\n'),
+    /Investor assessment: uncertain\. Reason: Missing current investment evidence/,
+  );
+});
+
 test('a batch processes all five pending profiles and reports queue exhaustion', async (t) => {
   const { options, storage, output } = await setup(t);
   options.config.max_profiles_per_run = 10;

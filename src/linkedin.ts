@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
 import type { Config } from './config.ts';
 import { ApplicationError } from './errors.ts';
+import { profileData } from './profile-data.ts';
 import { inspectSearchPage, searchLayoutReport } from './search-page.ts';
 import {
   inspectProfilePage,
@@ -114,12 +115,7 @@ function profileFromState(
       'Cannot read the LinkedIn profile layout. Use an English interface and review the browser; queue row remains working.',
     );
   }
-  return {
-    slug,
-    name: state.name,
-    text: state.text.slice(0, 24_000),
-    truncated: state.text.length > 24_000,
-  };
+  return profileData(state, slug);
 }
 
 export class LinkedInBrowser implements LinkedInReader {

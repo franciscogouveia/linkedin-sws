@@ -342,6 +342,9 @@ test(
         const profile = await extractProfile(page, 'alex-example');
         assert.match(profile.text, /early-stage/);
         assert.match(profile.text, /Example Ventures/);
+        assert.match(profile.sections?.header ?? '', /Angel investor/);
+        assert.match(profile.sections?.about ?? '', /early-stage/);
+        assert.match(profile.sections?.experience ?? '', /Example Ventures/);
         assert.ok(!profile.text.includes('Unrelated'));
       },
     );

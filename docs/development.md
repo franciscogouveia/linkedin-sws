@@ -110,18 +110,28 @@ configured duration. Diagnostics are bounded and redact the configured API key,
 authorization tokens, and supplied source text. Request bodies and headers are
 not logged. The queue row stays `working` so rerunning resumes it.
 
-Classification uses contextual investor evidence, not a keyword-only check. A
-positive assessment must include an excerpt present in the profile. Uncertain
-assessments become `failed` with `investor status uncertain`. This conservative
-prototype default can be revisited before full implementation. Grounded excerpts
-are a validation check; manually review the actual classification and wording.
+Classification receives labeled Header, About, and Experience text, with separate
+character budgets so a long About cannot crowd out Experience. It also receives
+the same profile's search-result role as supporting evidence. Logs show section
+sizes, truncation, the decision, and the model's reason and evidence.
+
+A self-attributed `Angel Investor` headline is sufficient evidence, even alongside
+another occupation. Startup investing and investment roles at VC funds also
+qualify; incidental investor mentions, recruiting, and fund support roles alone
+do not. A positive assessment must quote an excerpt present in the profile or
+search role. The LLM still makes the decision; these validation checks do not
+guarantee classification accuracy. Uncertain assessments become `failed` with
+`investor status uncertain`.
 
 ## Persistence and Recovery
 
 `queue` contains `id`, `name`, `role`, `slug`, `status`, and `failure`. It resumes a
 `working` row before selecting the oldest `new` row. Successful terminal output
 marks the row `dryrun`. Missing profiles and non-investors use the agreed exact
-failure reasons. `failed`, `dryrun`, and `sent` rows are never selected or reset.
+failure reasons. `failed`, `dryrun`, and `sent` rows are not selected automatically;
+the explicit reset command can return `dryrun` rows to `new`. To retest previously
+failed profiles after changing classification, use a separate `queue_path` (for
+example `data/classification-test.sqlite`); existing failed rows stay failed.
 
 `proper-lockfile` allows one active process per queue, with a heartbeat and stale
 lock recovery. SQLite commits each search append and status change independently.

@@ -17,6 +17,8 @@ export interface Profile {
   name: string;
   text: string;
   truncated: boolean;
+  sections?: { header: string; about: string; experience: string };
+  searchRole?: string;
 }
 
 export interface SearchCriteria {

@@ -55,7 +55,16 @@ export async function runDryRun(options: {
       log('Profile not found; recorded failed.');
       continue;
     }
+    profile.searchRole = row.role;
+    log(
+      profile.sections
+        ? `Profile data: header ${profile.sections.header.length}, About ${profile.sections.about.length}, Experience ${profile.sections.experience.length} characters; search role: ${terminalText(row.role)}; truncated: ${profile.truncated}.`
+        : `Profile data: ${profile.text.length} characters; search role: ${terminalText(row.role)}; truncated: ${profile.truncated}.`,
+    );
     const assessment = await writer.classify(profile);
+    log(
+      `Investor assessment: ${assessment.decision}. Reason: ${terminalText(assessment.reason)}${assessment.evidence ? ` Evidence: ${terminalText(assessment.evidence)}` : ''}`,
+    );
     signal.throwIfAborted();
     if (assessment.decision !== 'investor') {
       const failure =

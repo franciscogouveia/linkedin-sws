@@ -55,6 +55,83 @@ function responsesReply(text: string, status = 'completed') {
   };
 }
 
+test('explicit angel headlines qualify as grounded evidence even with another profession', () => {
+  for (const source of [
+    { ...profile, text: 'Christopher Example\nAngel Investor' },
+    { ...profile, text: 'Example Person\nTech PR and Angel Investor' },
+    {
+      ...profile,
+      text: 'Example Person\nEntrepreneur',
+      searchRole: 'Founder | Angel Investor',
+    },
+  ]) {
+    assert.equal(
+      parseAssessment(
+        JSON.stringify({
+          decision: 'investor',
+          evidence: 'Angel Investor',
+          reason: 'Self-attributed angel investing.',
+        }),
+        source,
+      ).decision,
+      'investor',
+    );
+  }
+  assert.equal(
+    parseAssessment(
+      JSON.stringify({
+        decision: 'investor',
+        evidence: 'Angel Investor',
+        reason: 'Unsupported claim.',
+      }),
+      { ...profile, text: 'Entrepreneur', searchRole: 'Advisor' },
+    ).decision,
+    'uncertain',
+  );
+});
+
+test('classification sends the queued headline and labeled section data without duplicating source text', async (t) => {
+  let input: { profile: Record<string, unknown> } | undefined;
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async (_url: unknown, init: RequestInit) => {
+      const request = JSON.parse(String(init.body));
+      input = JSON.parse(request.input);
+      return new Response(
+        JSON.stringify(
+          responsesReply(
+            JSON.stringify({
+              decision: 'investor',
+              evidence: 'Angel Investor',
+              reason: 'Explicit headline.',
+            }),
+          ),
+        ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  );
+  const candidate = {
+    ...profile,
+    searchRole: 'Tech PR | Angel Investor',
+    sections: {
+      header: 'Tech PR | Angel Investor',
+      about: '',
+      experience: 'Startup investing',
+    },
+    text: 'HEADER\nTech PR | Angel Investor\n\nEXPERIENCE\nStartup investing',
+  };
+  const writer = new LlmWriter(
+    testConfig('/tmp').llm,
+    new AbortController().signal,
+  );
+  assert.equal((await writer.classify(candidate)).decision, 'investor');
+  assert.equal(input?.profile.searchRole, candidate.searchRole);
+  assert.equal(input?.profile.text, candidate.text);
+  assert.equal(input?.profile.sections, undefined);
+});
+
 test('Responses requests include source context, disable storage, and validate generated text', async (t) => {
   const requests: Record<string, unknown>[] = [];
   const replies = [

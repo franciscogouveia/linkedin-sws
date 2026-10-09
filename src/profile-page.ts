@@ -2,6 +2,7 @@ export interface ProfilePageState {
   kind: 'profile' | 'missing' | 'blocked';
   name: string;
   text: string;
+  sections?: { header: string; about: string; experience: string };
 }
 
 // Runs in the browser. Do not reference Node helpers or imported values here.
@@ -149,7 +150,8 @@ export function inspectProfilePage(options: {
     chunks.push(lines.join('\n'));
   }
 
-  const selected = new Set<HTMLElement>();
+  const header = chunks.join('\n\n');
+  const selected = new Map<HTMLElement, 'about' | 'experience'>();
   for (const heading of scope.querySelectorAll<HTMLElement>(headingSelector)) {
     const label = sectionLabel(heading);
     if (!visible(heading) || (label !== 'about' && label !== 'experience'))
@@ -175,12 +177,17 @@ export function inspectProfilePage(options: {
       if (normalize(node.innerText) !== normalize(heading.innerText))
         block = node;
     }
-    if (block) selected.add(block);
+    if (block) selected.set(block, label);
   }
-  for (const block of selected) chunks.push(block.innerText.trim());
+  const sections = { header, about: '', experience: '' };
+  for (const [block, label] of selected) {
+    const content = block.innerText.trim();
+    chunks.push(content);
+    sections[label] = [sections[label], content].filter(Boolean).join('\n\n');
+  }
   const text = [...new Set(chunks)].filter(Boolean).join('\n\n');
   if (!meaningful(text)) return false;
-  return { kind: 'profile', name, text };
+  return { kind: 'profile', name, text, sections };
 }
 
 export function profileLayoutReport(options: { expectedName: string }) {
