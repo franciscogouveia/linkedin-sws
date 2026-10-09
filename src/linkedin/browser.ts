@@ -1,21 +1,21 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { chromium, type BrowserContext, type Page } from 'playwright';
-import type { Config } from './config.ts';
-import { ApplicationError } from './errors.ts';
-import { profileData } from './profile-data.ts';
-import { inspectSearchPage, searchLayoutReport } from './search-page.ts';
+import type { Config } from '../shared/config.ts';
+import { ApplicationError } from '../shared/errors.ts';
+import { profileData } from '../writing/profile-data.ts';
+import { inspectSearchPage, searchLayoutReport } from '../search/page.ts';
 import {
   inspectProfilePage,
   profileLayoutReport,
   type ProfilePageState,
-} from './profile-page.ts';
+} from '../writing/profile-page.ts';
 import type {
   Investor,
   LinkedInReader,
   Profile,
   SearchCriteria,
-} from './types.ts';
+} from '../shared/types.ts';
 
 export function profileSlug(href: string): string | undefined {
   try {

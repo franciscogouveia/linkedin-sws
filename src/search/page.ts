@@ -1,4 +1,4 @@
-import type { Investor } from './types.ts';
+import type { Investor } from '../shared/types.ts';
 
 export interface SearchPageState {
   kind: 'results' | 'empty' | 'blocked';

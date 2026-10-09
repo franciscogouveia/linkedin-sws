@@ -1,9 +1,9 @@
 import { access, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { parseConfig } from './config.ts';
-import { ApplicationError } from './errors.ts';
-import { openQueue } from './queue.ts';
-import { terminalText } from './workflow.ts';
+import { parseConfig } from '../shared/config.ts';
+import { ApplicationError } from '../shared/errors.ts';
+import { openQueue } from '../storage/queue.ts';
+import { terminalText } from '../communication/terminal.ts';
 
 async function main(): Promise<void> {
   if (process.argv.length > 2) {

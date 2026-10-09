@@ -230,10 +230,23 @@ visible profile text and your pitch are sent to your configured LLM service.
 | `npm run format`       | Format source, tests, and new documentation.                    |
 | `npm run check`        | Run type checking, tests, and formatting checks.                |
 
-`src/config.ts` handles startup, `src/queue.ts` handles storage,
-`src/linkedin.ts` handles browser access, `src/llm.ts` handles classification and
-writing, and `src/workflow.ts` coordinates the steps. `src/cli.ts` owns resources
-and handles interruptions. Tests live under `tests/` and use synthetic profiles,
+Source is organized by responsibility:
+
+| Directory            | Responsibility                                                                            |
+| -------------------- | ----------------------------------------------------------------------------------------- |
+| `src/search/`        | Search-page parsing, discovery, and appending queue rows.                                 |
+| `src/writing/`       | Profile extraction, investor classification, LLM requests, and queued message generation. |
+| `src/communication/` | Dry-run message formatting, terminal delivery, and terminal text sanitization.            |
+| `src/linkedin/`      | Shared browser session, navigation, authentication checks, and layout diagnostics.        |
+| `src/storage/`       | SQLite queue, status transitions, and process locking.                                    |
+| `src/shared/`        | YAML configuration, shared types, and application errors.                                 |
+| `src/app/`           | Composition of search and message workflows.                                              |
+| `src/cli/`           | Command entry points, resource ownership, and interruption handling.                      |
+
+The search workflow only needs a search-capable reader; the writing workflow only
+needs profile reading. Communication accepts an output callback and contains no
+LLM or database operations. CLI entry points compose these modules through the
+same public npm commands. Tests live under `tests/` and use synthetic profiles,
 mock LLM responses, and temporary SQLite databases. No coverage percentage is
 mandated. Use descriptive `*.test.ts` names, two-space indentation, and Prettier.
 TypeScript performs static checking; no separate lint tool is configured.

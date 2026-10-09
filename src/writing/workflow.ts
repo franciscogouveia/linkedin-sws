@@ -1,47 +1,22 @@
-import { stripVTControlCharacters } from 'node:util';
-import { ApplicationError } from './errors.ts';
-import type { Config } from './config.ts';
-import type { Queue } from './queue.ts';
-import type { LinkedInReader, PitchWriter } from './types.ts';
+import { ApplicationError } from '../shared/errors.ts';
+import type { Config } from '../shared/config.ts';
+import type { Queue } from '../storage/queue.ts';
+import type { LinkedInReader, PitchWriter } from '../shared/types.ts';
+import { terminalText } from '../communication/terminal.ts';
+import { displayMessage } from '../communication/delivery.ts';
 
-export function terminalText(value: string): string {
-  return stripVTControlCharacters(value).replace(
-    /[\x00-\x08\x0b-\x1f\x7f]/g,
-    '',
-  );
-}
-
-interface WorkflowOptions {
+export interface MessageOptions {
   config: Config;
   pitch: string;
   queue: Queue;
-  linkedin: LinkedInReader;
+  linkedin: Pick<LinkedInReader, 'readProfile'>;
   writer: PitchWriter;
   output: (text: string) => Promise<void>;
   log: (text: string) => void;
   signal: AbortSignal;
 }
 
-export async function runSearch(
-  options: Pick<
-    WorkflowOptions,
-    'config' | 'queue' | 'linkedin' | 'log' | 'signal'
-  >,
-) {
-  const { config, queue, linkedin, log, signal } = options;
-  let appended = 0;
-  signal.throwIfAborted();
-  const discovered = await linkedin.search(config.search, (investor) => {
-    signal.throwIfAborted();
-    if (queue.append(investor)) appended++;
-  });
-  log(
-    `Search collected ${discovered} profile(s); appended ${appended} new queue row(s).`,
-  );
-  return { discovered, appended };
-}
-
-export async function runMessages(options: WorkflowOptions) {
+export async function runMessages(options: MessageOptions) {
   const { config, pitch, queue, linkedin, writer, output, log, signal } =
     options;
   if (config.mode !== 'dryrun') {
@@ -89,11 +64,7 @@ export async function runMessages(options: WorkflowOptions) {
     }
     const message = await writer.write(profile, pitch, config.outreach);
     signal.throwIfAborted();
-    await output(
-      terminalText(
-        `\nTo: ${row.name}\nProfile: https://www.linkedin.com/in/${row.slug}/\n\n${message}\n\n`,
-      ),
-    );
+    await displayMessage(row, message, output);
     // Record completion only after the destination successfully accepts the output.
     signal.throwIfAborted();
     queue.finish(row.id, 'dryrun');
@@ -110,13 +81,4 @@ export async function runMessages(options: WorkflowOptions) {
       : `Stopped at max_profiles_per_run (${config.max_profiles_per_run}); rerun to process remaining rows.`,
   );
   return { processed, displayed };
-}
-
-export async function runDryRun(options: WorkflowOptions) {
-  if (options.config.mode !== 'dryrun') {
-    throw new ApplicationError('This prototype only supports mode: dryrun.');
-  }
-  const search = await runSearch(options);
-  const messages = await runMessages(options);
-  return { ...search, ...messages };
 }

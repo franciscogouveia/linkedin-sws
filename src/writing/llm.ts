@@ -1,14 +1,14 @@
 import OpenAI from 'openai';
 import { z } from 'zod';
-import type { Config } from './config.ts';
-import { ApplicationError } from './errors.ts';
+import type { Config } from '../shared/config.ts';
+import { ApplicationError } from '../shared/errors.ts';
 import { describeLlmError } from './llm-error.ts';
 import type {
   Assessment,
   OutreachContext,
   PitchWriter,
   Profile,
-} from './types.ts';
+} from '../shared/types.ts';
 
 const assessmentSchema = z.strictObject({
   decision: z.enum(['investor', 'not_investor', 'uncertain']),

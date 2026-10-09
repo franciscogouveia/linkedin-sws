@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { Config } from './config.ts';
+import type { Config } from '../shared/config.ts';
 
 export function describeLlmError(
   error: unknown,

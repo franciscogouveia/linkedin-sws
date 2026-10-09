@@ -6,8 +6,8 @@ import {
   parseAssessment,
   hasMessagePlaceholders,
   plainMessageLinks,
-} from '../src/llm.ts';
-import { describeLlmError } from '../src/llm-error.ts';
+} from '../src/writing/llm.ts';
+import { describeLlmError } from '../src/writing/llm-error.ts';
 import { profile, testConfig } from './helpers.ts';
 
 test('investor classification requires a quoted source excerpt and validates the entire response', () => {

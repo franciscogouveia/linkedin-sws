@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { profileData } from '../src/profile-data.ts';
+import { profileData } from '../src/writing/profile-data.ts';
 
 test('a long About section cannot displace the headline or venture-capital Experience', () => {
   const result = profileData(

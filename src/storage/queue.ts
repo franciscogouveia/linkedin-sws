@@ -2,8 +2,8 @@ import { mkdir, open, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import lockfile from 'proper-lockfile';
-import { ApplicationError } from './errors.ts';
-import type { Investor, QueueRow, QueueStatus } from './types.ts';
+import { ApplicationError } from '../shared/errors.ts';
+import type { Investor, QueueRow, QueueStatus } from '../shared/types.ts';
 
 export class Queue {
   private readonly database: DatabaseSync;

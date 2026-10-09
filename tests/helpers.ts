@@ -2,8 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { TestContext } from 'node:test';
-import { parseConfig } from '../src/config.ts';
-import type { Investor, Profile } from '../src/types.ts';
+import { parseConfig } from '../src/shared/config.ts';
+import type { Investor, Profile } from '../src/shared/types.ts';
 
 export async function temporaryDirectory(t: TestContext): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'linkedin-sws-test-'));

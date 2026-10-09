@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { writeFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
-import { loadConfiguration, loadStartup, parseConfig } from '../src/config.ts';
+import {
+  loadConfiguration,
+  loadStartup,
+  parseConfig,
+} from '../src/shared/config.ts';
 import { configYaml, temporaryDirectory } from './helpers.ts';
 
 test('configuration resolves paths against its location and sets small prototype limits', () => {

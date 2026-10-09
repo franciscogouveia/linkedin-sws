@@ -11,9 +11,9 @@ import {
   extractSearchResults,
   profileSlug,
   searchUrl,
-} from '../src/linkedin.ts';
-import { searchLayoutReport } from '../src/search-page.ts';
-import { profileLayoutReport } from '../src/profile-page.ts';
+} from '../src/linkedin/browser.ts';
+import { searchLayoutReport } from '../src/search/page.ts';
+import { profileLayoutReport } from '../src/writing/profile-page.ts';
 import { investor, temporaryDirectory } from './helpers.ts';
 
 test('profile identifiers and keyword searches preserve encoding and reject unrelated URLs', () => {

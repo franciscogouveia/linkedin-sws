@@ -1,9 +1,12 @@
-import { ApplicationError } from './errors.ts';
-import { loadConfiguration, loadStartup } from './config.ts';
-import { openQueue } from './queue.ts';
-import { openLinkedIn } from './linkedin.ts';
-import { LlmWriter } from './llm.ts';
-import { runDryRun, runSearch, runMessages, terminalText } from './workflow.ts';
+import { ApplicationError } from '../shared/errors.ts';
+import { loadConfiguration, loadStartup } from '../shared/config.ts';
+import { openQueue } from '../storage/queue.ts';
+import { openLinkedIn } from '../linkedin/browser.ts';
+import { LlmWriter } from '../writing/llm.ts';
+import { runDryRun } from '../app/workflow.ts';
+import { runSearch } from '../search/workflow.ts';
+import { runMessages } from '../writing/workflow.ts';
+import { terminalText } from '../communication/terminal.ts';
 
 async function main(stage: 'search' | 'message' | 'all'): Promise<void> {
   if (process.argv.length > 2) {

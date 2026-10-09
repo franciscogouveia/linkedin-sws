@@ -1,5 +1,5 @@
 import type { ProfilePageState } from './profile-page.ts';
-import type { Profile } from './types.ts';
+import type { Profile } from '../shared/types.ts';
 
 // Reserve space for each section so a lengthy About cannot displace Experience.
 export function profileData(state: ProfilePageState, slug: string): Profile {
