@@ -28,6 +28,11 @@ These files let founders express whom they want to reach and what they want to c
 - **Send mode:** Run the search and writing workflow, then send the generated pitches as direct messages on LinkedIn.
 - **Dry-run mode:** Run the search and writing workflow, then display the generated messages in the terminal without sending them to anyone.
 
+## LLM Compatibility
+
+- Compatible with the OpenAI API through a configurable endpoint and model.
+- Tested with Ollama running `gemma4:e4b`, using the OpenAI-compatible Chat Completions API.
+
 ## Scope
 
 The product focuses on founders seeking angel investment, with LinkedIn as its only platform. Other outreach use cases may be considered in the future and are outside the current scope.

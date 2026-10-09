@@ -43,6 +43,10 @@ contradicts them. Missing details are omitted rather than replaced with template
 placeholders; unresolved placeholders cause generation to stop with the row still
 `working`.
 
+Website links use plain URLs. Wrappers such as `[Link to https://example.com]`
+and Markdown links are converted to their URL before validating the message;
+placeholders without a URL, such as `[Link to website]`, still stop generation.
+
 Message generation looks for a relevant investment, portfolio company, sector,
 or thesis in the investor's extracted About and Experience, and connects at most
 one supported example to your business. It does not research outside companies

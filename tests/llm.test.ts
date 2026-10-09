@@ -5,6 +5,7 @@ import {
   LlmWriter,
   parseAssessment,
   hasMessagePlaceholders,
+  plainMessageLinks,
 } from '../src/llm.ts';
 import { describeLlmError } from '../src/llm-error.ts';
 import { profile, testConfig } from './helpers.ts';
@@ -204,6 +205,9 @@ test('placeholder checks reject unfinished templates while allowing normal punct
     '[Company Name]',
     '[Investor Name]',
     '[Funding Amount]',
+    '[Link to website]',
+    '[Link: website]',
+    '[website link]',
     '<business_name>',
     '{{founder_name}}',
     'TODO',
@@ -218,6 +222,47 @@ test('placeholder checks reject unfinished templates while allowing normal punct
   ]) {
     assert.equal(hasMessagePlaceholders(value), false, value);
   }
+});
+
+test('link wrappers become plain URLs without altering the URL or the rest of the signature', async (t) => {
+  const url = 'https://de-gouveia.eu';
+  const signature = 'Francisco de Gouveia\nCo-Founder and CTO, Useless Waste\n';
+  for (const link of [
+    `[Link to ${url}]`,
+    `[Website](${url})`,
+    `[${url}]`,
+    `<${url}>`,
+    url,
+  ]) {
+    assert.equal(plainMessageLinks(signature + link), signature + url);
+  }
+  assert.equal(
+    plainMessageLinks('[Site](https://example.com/path?x=1&y=2#about)'),
+    'https://example.com/path?x=1&y=2#about',
+  );
+  assert.equal(plainMessageLinks('[Link to website]'), '[Link to website]');
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async () =>
+      new Response(
+        JSON.stringify(responsesReply(signature + `[Link to ${url}]`)),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+  );
+  const writer = new LlmWriter(
+    testConfig('/tmp').llm,
+    new AbortController().signal,
+  );
+  assert.equal(
+    await writer.write(profile, 'Our verified pitch', {
+      founder_name: 'Francisco de Gouveia',
+      founder_role: 'Co-Founder and CTO',
+      business_name: 'Useless Waste',
+      website: url,
+    }),
+    signature + url,
+  );
 });
 
 test('a generated placeholder stops processing rather than being accepted as a finished message', async (t) => {
