@@ -94,3 +94,39 @@ test('queue refuses invalid failure reasons and completion of terminal rows', as
     /no longer working/,
   );
 });
+
+test('resetting dryruns persists only dryrun-to-new changes and preserves other statuses and details', async (t) => {
+  const path = join(await temporaryDirectory(t), 'queue.sqlite');
+  const fixture = await openQueue(path);
+  const statuses = ['dryrun', 'dryrun', 'failed', 'sent', 'working', 'new'];
+  for (let i = 0; i < statuses.length; i++) {
+    fixture.queue.append({ ...investor, slug: `profile-${i}` });
+  }
+  await fixture.close();
+  const database = new DatabaseSync(path);
+  for (let i = 0; i < statuses.length; i++) {
+    const status = statuses[i];
+    database
+      .prepare('UPDATE queue SET status = ?, failure = ? WHERE slug = ?')
+      .run(
+        status!,
+        status === 'failed' ? 'not an investor' : '',
+        `profile-${i}`,
+      );
+  }
+  database.close();
+  const storage = await openQueue(path);
+  const before = storage.queue.rows();
+  assert.equal(storage.queue.resetDryruns(), 2);
+  assert.equal(storage.queue.resetDryruns(), 0);
+  await storage.close();
+  const reopened = await openQueue(path);
+  t.after(() => reopened.close());
+  assert.deepEqual(
+    reopened.queue.rows().map((row) => ({ ...row })),
+    before.map((row) => ({
+      ...row,
+      status: row.status === 'dryrun' ? 'new' : row.status,
+    })),
+  );
+});

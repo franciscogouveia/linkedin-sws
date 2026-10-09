@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "node src/cli.ts",
+    "queue:reset-dryruns": "node src/reset-dryruns.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/cli.js",
     "typecheck": "tsc --noEmit",

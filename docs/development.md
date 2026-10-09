@@ -38,6 +38,19 @@ Do not commit that file if it contains personal information or private pitches.
 
 ## Configuration
 
+To regenerate messages for previously completed dry runs:
+
+```bash
+npm run queue:reset-dryruns
+npm run dev
+```
+
+The reset command reads `queue_path` from `config.yaml` and changes only `dryrun`
+rows to `new`, preserving their names, roles, identifiers, and insertion order.
+It prints the number reset and refuses to run while another process holds the
+queue lock. It does not open LinkedIn, contact an LLM, or require the pitch file.
+Failed rows remain failed.
+
 The complete example is [config.example.yaml](../config.example.yaml).
 
 | Setting                                            | Behavior                                                                                                                             |

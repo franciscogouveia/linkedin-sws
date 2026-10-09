@@ -75,6 +75,14 @@ export class Queue {
     }
   }
 
+  resetDryruns(): number {
+    return Number(
+      this.database
+        .prepare("UPDATE queue SET status = 'new' WHERE status = 'dryrun'")
+        .run().changes,
+    );
+  }
+
   counts(): Record<QueueStatus, number> {
     const counts = { new: 0, working: 0, sent: 0, failed: 0, dryrun: 0 };
     const groups = this.database
