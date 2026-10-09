@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import OpenAI from 'openai';
-import { LlmWriter, parseAssessment } from '../src/llm.ts';
+import {
+  LlmWriter,
+  parseAssessment,
+  hasMessagePlaceholders,
+} from '../src/llm.ts';
 import { describeLlmError } from '../src/llm-error.ts';
 import { profile, testConfig } from './helpers.ts';
 
@@ -130,6 +134,112 @@ test('classification sends the queued headline and labeled section data without 
   assert.equal(input?.profile.searchRole, candidate.searchRole);
   assert.equal(input?.profile.text, candidate.text);
   assert.equal(input?.profile.sections, undefined);
+});
+
+test('message requests contain configured founder facts, the business pitch, and attributed investment examples', async (t) => {
+  for (const api of ['responses', 'chat-completions'] as const) {
+    await t.test(api, async (t) => {
+      const settings = testConfig('/tmp').llm;
+      settings.api = api;
+      let sent: Record<string, unknown> | undefined;
+      t.mock.method(
+        globalThis,
+        'fetch',
+        async (_url: unknown, init: RequestInit) => {
+          const request = JSON.parse(String(init.body));
+          sent = JSON.parse(
+            api === 'responses' ? request.input : request.messages[1].content,
+          );
+          const content =
+            'Hello Alex, our business helps clinics automate scheduling. Could we discuss our seed round? Sam';
+          const reply =
+            api === 'responses'
+              ? responsesReply(content)
+              : {
+                  id: 'chat_test',
+                  object: 'chat.completion',
+                  created: 1,
+                  model: 'test-model',
+                  choices: [
+                    {
+                      index: 0,
+                      finish_reason: 'stop',
+                      message: { role: 'assistant', content },
+                    },
+                  ],
+                };
+          return new Response(JSON.stringify(reply), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        },
+      );
+      const context = {
+        founder_name: 'Sam',
+        business_name: 'ClinicFlow',
+        funding_stage: 'Seed',
+        funding_ask: 'Raising EUR 500,000',
+        industry: 'Healthcare software',
+      };
+      const source = {
+        ...profile,
+        text: 'Angel Investor\nI invested in ClinicTools, which provides software for clinics.',
+      };
+      const writer = new LlmWriter(settings, new AbortController().signal);
+      await writer.write(
+        source,
+        'We automate scheduling for clinics.',
+        context,
+      );
+      assert.deepEqual(sent?.outreach, context);
+      assert.equal(sent?.pitch, 'We automate scheduling for clinics.');
+      assert.match(JSON.stringify(sent?.profile), /I invested in ClinicTools/);
+    });
+  }
+});
+
+test('placeholder checks reject unfinished templates while allowing normal punctuation and acronyms', () => {
+  for (const value of [
+    '[Your Name]',
+    '[Company Name]',
+    '[Investor Name]',
+    '[Funding Amount]',
+    '<business_name>',
+    '{{founder_name}}',
+    'TODO',
+    'TBD',
+  ]) {
+    assert.equal(hasMessagePlaceholders(`Hello Alex, ${value}`), true, value);
+  }
+  for (const value of [
+    'Hello Alex, could we talk? Sam',
+    'We develop artificial intelligence [AI] tools.',
+    'Our revenue grew 20% < 30%.',
+  ]) {
+    assert.equal(hasMessagePlaceholders(value), false, value);
+  }
+});
+
+test('a generated placeholder stops processing rather than being accepted as a finished message', async (t) => {
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async () =>
+      new Response(
+        JSON.stringify(
+          responsesReply('Hello Alex, could we discuss funding? [Your Name]'),
+        ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+  );
+  const writer = new LlmWriter(
+    testConfig('/tmp').llm,
+    new AbortController().signal,
+  );
+  await assert.rejects(
+    writer.write(profile, 'Our business pitch'),
+    /unresolved placeholders.*Queue row remains working/,
+  );
 });
 
 test('Responses requests include source context, disable storage, and validate generated text', async (t) => {

@@ -163,6 +163,22 @@ test('classification receives the search role and logs the decision reason and e
   );
 });
 
+test('the workflow passes configured outreach facts into message generation', async (t) => {
+  const { options } = await setup(t);
+  options.config.outreach = {
+    founder_name: 'Sam',
+    business_name: 'Acme',
+    funding_stage: 'Pre-seed',
+  };
+  let received: unknown;
+  options.writer.write = async (_profile, _pitch, context) => {
+    received = context;
+    return 'Hello Alex, could we discuss funding Acme? Sam';
+  };
+  await runDryRun(options);
+  assert.deepEqual(received, options.config.outreach);
+});
+
 test('a batch processes all five pending profiles and reports queue exhaustion', async (t) => {
   const { options, storage, output } = await setup(t);
   options.config.max_profiles_per_run = 10;

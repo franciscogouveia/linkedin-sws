@@ -75,7 +75,7 @@ export async function runDryRun(options: {
       log(`${failure}; recorded failed.`);
       continue;
     }
-    const message = await writer.write(profile, pitch);
+    const message = await writer.write(profile, pitch, config.outreach);
     signal.throwIfAborted();
     await output(
       terminalText(

@@ -1,3 +1,5 @@
+import type { Config } from './config.ts';
+
 export interface Investor {
   name: string;
   role: string;
@@ -43,5 +45,11 @@ export interface Assessment {
 
 export interface PitchWriter {
   classify(profile: Profile): Promise<Assessment>;
-  write(profile: Profile, pitch: string): Promise<string>;
+  write(
+    profile: Profile,
+    pitch: string,
+    context?: OutreachContext,
+  ): Promise<string>;
 }
+
+export type OutreachContext = Config['outreach'];

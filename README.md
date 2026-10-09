@@ -1,3 +1,7 @@
+# ⚠️ WARNING: Risk of LinkedIn Account Suspension
+
+**This tool is a proof of concept (PoC). Using it may lead to your LinkedIn account being restricted or suspended.** Automated browsing and outreach may violate LinkedIn's terms. Dry-run mode still automates access to LinkedIn and carries this risk. Use at your own risk.
+
 # LinkedIn Search-Write-Send
 
 LinkedIn Search-Write-Send automates personalized outreach for founders seeking angel investment. It brings investor discovery, pitch writing, and message delivery into a single workflow on LinkedIn.

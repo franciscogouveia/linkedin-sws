@@ -39,6 +39,27 @@ test('processing limits above ten are accepted but must be positive safe integer
   }
 });
 
+test('outreach accepts optional founder and business facts without breaking existing configurations', () => {
+  assert.deepEqual(parseConfig(configYaml, '/tmp/config.yaml').outreach, {});
+  const context =
+    '\noutreach:\n  founder_name: Sam Founder\n  business_name: Acme\n  funding_stage: Seed\n  funding_ask: Raising EUR 500,000\n  website: https://example.com';
+  const config = parseConfig(configYaml + context, '/tmp/config.yaml');
+  assert.equal(config.outreach.founder_name, 'Sam Founder');
+  assert.equal(config.outreach.business_name, 'Acme');
+  assert.equal(config.outreach.funding_stage, 'Seed');
+  assert.equal(config.outreach.funding_ask, 'Raising EUR 500,000');
+  for (const value of [
+    'founder_name: ""',
+    'funding_stage: 123',
+    'website: ftp://example.com',
+    'unknown: field',
+  ]) {
+    assert.throws(() =>
+      parseConfig(`${configYaml}\noutreach:\n  ${value}`, '/tmp/config.yaml'),
+    );
+  }
+});
+
 test('configuration permits Ollama over HTTP on loopback, LAN addresses, and hostnames', () => {
   for (const endpoint of [
     'http://localhost:11434/v1/',

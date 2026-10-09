@@ -22,6 +22,34 @@ Edit the private `config.yaml` and `pitch.md` before running. Set the LLM API ke
 endpoint, and model in YAML. The pitch is loaded once at startup. Keep your actual
 business facts in the pitch; the example is an outline, not a fictional business.
 
+Add optional founder and business facts under `outreach` so messages can use a
+real identity and a specific funding request:
+
+```yaml
+outreach:
+  founder_name: Sam Founder
+  founder_role: Founder and CEO
+  business_name: Example Business
+  industry: Healthcare software
+  funding_stage: Pre-seed
+  funding_ask: Raising EUR 250,000
+  website: https://example.com
+```
+
+Replace example values with your own facts, or omit fields you do not wish to
+supply. The pitch remains the source for your problem, solution, business story,
+and verified traction. Configured outreach fields take precedence if the pitch
+contradicts them. Missing details are omitted rather than replaced with template
+placeholders; unresolved placeholders cause generation to stop with the row still
+`working`.
+
+Message generation looks for a relevant investment, portfolio company, sector,
+or thesis in the investor's extracted About and Experience, and connects at most
+one supported example to your business. It does not research outside companies
+or assume that a fund's investment was made personally by the profile owner.
+Without a relevant example, it uses supported role/sector context or a direct
+business pitch. Review generated messages for factual accuracy.
+
 ```bash
 npm run dev
 ```

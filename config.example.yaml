@@ -4,6 +4,17 @@ pitch_path: pitch.md
 queue_path: data/queue.sqlite
 max_profiles_per_run: 1
 
+# Optional facts used in message generation. Replace examples with your real facts,
+# or omit any field you do not want to supply. Missing details are left out.
+outreach:
+  founder_name: Alex Example
+  founder_role: Founder and CEO
+  business_name: Example Business
+  industry: B2B software
+  funding_stage: Pre-seed
+  funding_ask: Raising EUR 250,000
+  website: https://example.com
+
 search:
   keywords: '"angel investor"'
   max_results: 5

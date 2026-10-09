@@ -9,6 +9,23 @@ const configSchema = z.strictObject({
   mode: z.literal('dryrun'),
   pitch_path: nonempty,
   queue_path: nonempty,
+  outreach: z
+    .strictObject({
+      founder_name: nonempty.max(200).optional(),
+      founder_role: nonempty.max(200).optional(),
+      business_name: nonempty.max(200).optional(),
+      industry: nonempty.max(500).optional(),
+      funding_stage: nonempty.max(200).optional(),
+      funding_ask: nonempty.max(500).optional(),
+      website: z
+        .url()
+        .refine(
+          (value) => /^https?:\/\//i.test(value),
+          'Use an HTTP or HTTPS website URL.',
+        )
+        .optional(),
+    })
+    .default({}),
   max_profiles_per_run: z
     .number()
     .int()
