@@ -1,7 +1,7 @@
 # Running the Prototype
 
 This milestone searches LinkedIn, persists a small queue, analyzes a visible
-profile, and prints a generated funding message. It accepts **dry-run mode only**;
+profile, and prints a generated funding message or prepares a browser draft. It accepts **dry-run modes only**;
 there is no sending operation. The default run discovers at most five profiles
 and processes one queued profile, which may fail investor verification.
 
@@ -69,7 +69,7 @@ npm run dev:message
 slug. It does not analyze profiles, load the pitch, or call the LLM.
 `dev:message` processes existing `working` and `new` rows up to
 `max_profiles_per_run`, without running a search. It reads investor profiles,
-classifies them, and prints generated messages in dry-run mode. Both commands use
+classifies them, and displays messages or prepares browser drafts according to `mode`. Both commands use
 the same configuration, queue lock, and browser session. An empty message queue
 exits without opening the browser. `npm run dev` still runs both stages together.
 After `npm run build`, use `npm run start:search` and `npm run start:message` for
@@ -81,9 +81,38 @@ manually in the Chromium window. The browser session is reused from
 `linkedin.session_dir`; the application does not collect your password. Use an
 English LinkedIn interface for this initial extraction implementation.
 
-Generated messages go to standard output; progress and errors go to standard
+In `dryrun-terminal`, generated messages go to standard output; progress and errors go to standard
 error. Redirect messages with `npm run dev:message --silent > messages.txt` if desired.
 Do not commit that file if it contains personal information or private pitches.
+
+## Browser Draft Review
+
+Set `mode: dryrun-browser` in `config.yaml`, then run `npm run dev:message`
+(or `npm run dev` to search first). Each qualifying recipient gets a separate
+profile tab. The tool opens their Message action, verifies the composer recipient,
+and fills an empty body. InMail also receives an LLM-generated subject of at most
+80 characters. Subjects and bodies must pass placeholder validation.
+
+Text is read back before recording `dryrun`. The tool never clicks Send, submits
+the form, or presses Enter. Existing nonempty body or subject fields are preserved;
+ambiguous recipients/layouts and transient errors stop with the row `working`.
+An explicit messaging restriction or upgrade/credit requirement records `failed`
+and continues to the next row. Missing Message controls without a clear restriction
+stop for manual review rather than guessing eligibility.
+
+After the batch, or a processing error, the CLI prints:
+
+```text
+Waiting for browser to be closed by the user
+```
+
+Review the drafts and close the browser to finish and release the queue lock.
+Closing it during processing cancels outstanding work, preserving unfinished rows
+as `working`. Ctrl+C remains an emergency interruption. Draft text is not saved
+in SQLite or local files; LinkedIn may not retain it after closure. Resetting queue
+rows does not clear LinkedIn drafts, so review existing drafts before retesting.
+Composer layout failures can save count-only `composer-layout-*.json` diagnostics
+beside the browser session; they contain no message text or profile identifiers.
 
 ## Configuration
 
@@ -104,7 +133,7 @@ The complete example is [config.example.yaml](../config.example.yaml).
 
 | Setting                                            | Behavior                                                                                                                             |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `mode`                                             | Must be `dryrun`. Live mode is rejected at startup.                                                                                  |
+| `mode`                                             | `dryrun-terminal` or `dryrun-browser`. Former `dryrun` must be renamed; live is rejected.                                            |
 | `search.keywords`                                  | Keywords for ordinary LinkedIn people search, including supported Boolean syntax.                                                    |
 | `search.max_results`                               | Maximum unique profiles collected per run; default 5, maximum 50.                                                                    |
 | `search.max_pages`                                 | Maximum search pages visited; default 1, maximum 10.                                                                                 |
@@ -175,8 +204,8 @@ guarantee classification accuracy. Uncertain assessments become `failed` with
 ## Persistence and Recovery
 
 `queue` contains `id`, `name`, `role`, `slug`, `status`, and `failure`. It resumes a
-`working` row before selecting the oldest `new` row. Successful terminal output
-marks the row `dryrun`. Missing profiles and non-investors use the agreed exact
+`working` row before selecting the oldest `new` row. Successful terminal output or
+verified browser draft preparation marks the row `dryrun`. Missing profiles and non-investors use the agreed exact
 failure reasons. `failed`, `dryrun`, and `sent` rows are not selected automatically;
 the explicit reset command can return `dryrun` rows to `new`. To retest previously
 failed profiles after changing classification, use a separate `queue_path` (for
@@ -237,7 +266,7 @@ Source is organized by responsibility:
 | `src/search/`                  | Discovery and appending queue rows through reader and queue interfaces.                  |
 | `src/writing/`                 | Profile text budgets, classification prompts, pitch generation, and response validation. |
 | `src/communication/`           | Dry-run message formatting, terminal delivery, and terminal text sanitization.           |
-| `src/infrastructure/linkedin/` | Browser sessions, DOM extraction, navigation, authentication checks, and diagnostics.    |
+| `src/infrastructure/linkedin/` | Browser sessions, profile extraction, verified draft preparation, and diagnostics.       |
 | `src/infrastructure/storage/`  | SQLite queue, status transitions, and process locking.                                   |
 | `src/infrastructure/llm/`      | OpenAI-compatible SDK transport, response handling, and redacted error diagnostics.      |
 | `src/shared/`                  | Domain data types, queue/reader/text-generator interfaces, and application errors.       |
@@ -264,8 +293,10 @@ your LinkedIn login or incur LLM charges.
 1. Configure your actual pitch, a narrow keyword query, and LLM access.
 2. Run the CLI from a graphical desktop and complete manual login.
 3. Verify search rows in the SQLite `queue` table and compare them with the browser.
-4. Verify the selected profile's investor evidence and generated message in the terminal.
-5. Restart and confirm previously completed rows are skipped and the session is reused.
+4. Verify the investor evidence and generated message in terminal mode.
+5. Switch to `dryrun-browser`, reset completed dry runs, and rerun message processing. Verify each recipient, body, and InMail subject; confirm nothing is sent and close the browser.
+6. Test an existing draft and a restricted recipient; confirm preserved text and queue statuses.
+7. Restart and confirm previously completed rows are skipped and the session is reused.
 
 Live sending is a later milestone. Before adding it, validate message eligibility
 and choose how to recover from an uncertain send without sending twice.

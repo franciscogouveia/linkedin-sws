@@ -1,6 +1,10 @@
-import { ApplicationError } from '../shared/errors.ts';
+import {
+  ApplicationError,
+  MessagingUnavailableError,
+} from '../shared/errors.ts';
 import type {
   LinkedInReader,
+  LinkedInMessenger,
   PitchWriter,
   QueueStore,
   OutreachContext,
@@ -10,7 +14,7 @@ import { displayMessage } from '../communication/delivery.ts';
 
 export interface MessageOptions {
   config: {
-    mode: 'dryrun';
+    mode: 'dryrun-terminal' | 'dryrun-browser';
     max_profiles_per_run: number;
     outreach: OutreachContext;
   };
@@ -18,6 +22,7 @@ export interface MessageOptions {
   queue: QueueStore;
   linkedin: Pick<LinkedInReader, 'readProfile'>;
   writer: PitchWriter;
+  messenger?: LinkedInMessenger;
   output: (text: string) => Promise<void>;
   log: (text: string) => void;
   signal: AbortSignal;
@@ -26,8 +31,15 @@ export interface MessageOptions {
 export async function runMessages(options: MessageOptions) {
   const { config, pitch, queue, linkedin, writer, output, log, signal } =
     options;
-  if (config.mode !== 'dryrun') {
-    throw new ApplicationError('This prototype only supports mode: dryrun.');
+  if (!['dryrun-terminal', 'dryrun-browser'].includes(config.mode)) {
+    throw new ApplicationError(
+      'This prototype supports dryrun-terminal and dryrun-browser; live sending is unavailable.',
+    );
+  }
+  if (config.mode === 'dryrun-browser' && !options.messenger) {
+    throw new ApplicationError(
+      'Browser draft preparation requires a LinkedIn messenger.',
+    );
   }
   const initial = queue.counts();
   log(
@@ -71,7 +83,35 @@ export async function runMessages(options: MessageOptions) {
     }
     const message = await writer.write(profile, pitch, config.outreach);
     signal.throwIfAborted();
-    await displayMessage(row, message, output);
+    if (config.mode === 'dryrun-terminal') {
+      await displayMessage(row, message, output);
+    } else {
+      try {
+        const composer = await options.messenger!.openComposer(row);
+        signal.throwIfAborted();
+        const subject =
+          composer.kind === 'inmail'
+            ? await writer.writeSubject(
+                profile,
+                pitch,
+                message,
+                config.outreach,
+              )
+            : undefined;
+        signal.throwIfAborted();
+        await composer.fill({
+          body: message,
+          ...(subject === undefined ? {} : { subject }),
+        });
+        log(`Draft prepared for ${terminalText(row.name)}; no message sent.`);
+      } catch (error) {
+        signal.throwIfAborted();
+        if (!(error instanceof MessagingUnavailableError)) throw error;
+        queue.finish(row.id, 'failed', error.message);
+        log(`${terminalText(error.message)}; recorded failed.`);
+        continue;
+      }
+    }
     // Record completion only after the destination successfully accepts the output.
     signal.throwIfAborted();
     queue.finish(row.id, 'dryrun');
@@ -80,7 +120,7 @@ export async function runMessages(options: MessageOptions) {
   const final = queue.counts();
   const pending = final.new + final.working;
   log(
-    `Dry run finished: ${processed} processed, ${displayed} message(s) displayed, ${processed - displayed} failed this run; ${pending} pending.`,
+    `Dry run finished: ${processed} processed, ${displayed} message(s) ${config.mode === 'dryrun-terminal' ? 'displayed' : 'prepared'}, ${processed - displayed} failed this run; ${pending} pending.`,
   );
   log(
     pending === 0

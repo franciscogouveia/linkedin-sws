@@ -12,7 +12,7 @@ export async function temporaryDirectory(t: TestContext): Promise<string> {
 }
 
 export const configYaml = `
-mode: dryrun
+mode: dryrun-terminal
 pitch_path: pitch.md
 queue_path: data/queue.sqlite
 search:

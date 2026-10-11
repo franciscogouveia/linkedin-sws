@@ -21,10 +21,10 @@ test('configuration resolves paths against its location and sets small prototype
 
 test('configuration rejects live mode, unsupported filters, duplicate keys, and invalid limits', () => {
   for (const text of [
-    configYaml.replace('mode: dryrun', 'mode: live'),
+    configYaml.replace('mode: dryrun-terminal', 'mode: live'),
     configYaml.replace('search:', 'search:\n  location: London'),
     configYaml.replace('search:', 'search:\n  max_results: -1'),
-    `${configYaml}\nmode: dryrun`,
+    `${configYaml}\nmode: dryrun-terminal`,
   ]) {
     assert.throws(() => parseConfig(text, '/tmp/config.yaml'));
   }
@@ -150,4 +150,26 @@ test('queue path cannot overwrite pitch or configuration', () => {
       /must differ/,
     );
   }
+});
+
+test('both dry-run modes are accepted; the former mode has migration guidance', () => {
+  assert.equal(
+    parseConfig(configYaml, '/tmp/config.yaml').mode,
+    'dryrun-terminal',
+  );
+  assert.equal(
+    parseConfig(
+      configYaml.replace('dryrun-terminal', 'dryrun-browser'),
+      '/tmp/config.yaml',
+    ).mode,
+    'dryrun-browser',
+  );
+  assert.throws(
+    () =>
+      parseConfig(
+        configYaml.replace('dryrun-terminal', 'dryrun'),
+        '/tmp/config.yaml',
+      ),
+    /Rename mode: dryrun to mode: dryrun-terminal/,
+  );
 });

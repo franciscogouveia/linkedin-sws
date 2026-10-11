@@ -17,3 +17,5 @@ messages.txt
 
 !example/pitch.md
 !example/config.yaml
+
+**/diagnostics/composer-layout-*.json

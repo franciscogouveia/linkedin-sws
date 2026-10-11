@@ -4,7 +4,7 @@
 
 This is a fun experiment and proof of concept that leverages LLMs to post-filter search results by validating that the profile is of an investor and then generating a message asking for funding.
 
-For now, only dry-run is implemented, so the messages will simply be printed on the terminal instead of actually being sent.
+For now, only dry-run is implemented. Messages can be printed in the terminal (`dryrun-terminal`) or filled into LinkedIn message drafts for review (`dryrun-browser`). Neither mode sends messages.
 
 # LinkedIn Search-Write-Send
 
@@ -20,7 +20,7 @@ Give founders a simple way to turn their investor criteria and business story in
 
 1. **Search:** Find angel investors on LinkedIn using criteria supplied in a YAML file.
 2. **Write:** Generate a personalized message for each investor using the founder's business description and funding pitch, supplied in a Markdown file.
-3. **Send:** Deliver each personalized pitch as a direct message to its intended recipient on LinkedIn, or display it in the terminal during a dry run.
+3. **Send:** Deliver each personalized pitch as a direct message to its intended recipient on LinkedIn, or prepare it for review during a dry run. Sending is a future milestone.
 
 ## Founder Inputs
 
@@ -31,8 +31,13 @@ These files let founders express whom they want to reach and what they want to c
 
 ## Execution Modes
 
-- **Send mode:** Run the search and writing workflow, then send the generated pitches as direct messages on LinkedIn.
-- **Dry-run mode:** Run the search and writing workflow, then display the generated messages in the terminal without sending them to anyone.
+- **`dryrun-terminal`:** Display generated messages in the terminal.
+- **`dryrun-browser`:** Open a separate tab per recipient and fill the message body, plus a subject for InMail. Review drafts, then close the browser to finish. The tool never presses Send.
+- **Send mode (planned):** Deliver personalized messages on LinkedIn. Live mode is currently rejected.
+
+Select the mode in `config.yaml`; no CLI arguments are required. Both dry-run modes record queue status `dryrun`, and `npm run queue:reset-dryruns` returns those rows to `new` for testing. Browser mode preserves existing nonempty drafts and stops for review. Draft text is not stored locally, and LinkedIn may not retain drafts after the browser closes.
+
+See [setup and commands](docs/development.md) for `npm run dev:search` and `npm run dev:message`.
 
 ## LLM Compatibility
 

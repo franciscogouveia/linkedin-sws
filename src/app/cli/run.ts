@@ -1,3 +1,4 @@
+import { withBrowserReview } from '../browser-review.ts';
 import { ApplicationError } from '../../shared/errors.ts';
 import { loadConfiguration, loadStartup } from '../config.ts';
 import { openQueue } from '../../infrastructure/storage/queue.ts';
@@ -44,7 +45,9 @@ async function main(stage: 'search' | 'message' | 'all'): Promise<void> {
     log(
       stage === 'search'
         ? 'Starting LinkedIn search. Results will be added to the queue.'
-        : 'Starting dry-run prototype. Generated messages will be printed to the terminal.',
+        : config.mode === 'dryrun-terminal'
+          ? 'Starting dry-run prototype. Generated messages will be printed to the terminal.'
+          : 'Starting browser dry run. Drafts will be prepared without sending.',
     );
     browser = await openLinkedIn(config.linkedin, controller.signal, log);
     if (stage === 'search') {
@@ -64,21 +67,26 @@ async function main(stage: 'search' | 'message' | 'all'): Promise<void> {
       new OpenAITextClient(config.llm, controller.signal),
       config.llm.max_message_characters,
     );
-    await (stage === 'message' ? runMessages : runDryRun)({
-      config,
-      pitch,
-      queue: storage.queue,
-      linkedin: browser.reader,
-      writer,
-      signal: controller.signal,
-      output: (text) =>
-        new Promise<void>((resolve, reject) => {
-          process.stdout.write(text, (error) =>
-            error ? reject(error) : resolve(),
-          );
-        }),
-      log,
-    });
+    const work = () =>
+      (stage === 'message' ? runMessages : runDryRun)({
+        config,
+        pitch,
+        queue: storage!.queue,
+        linkedin: browser!.reader,
+        messenger: browser!.messenger,
+        writer,
+        signal: controller.signal,
+        output: (text) =>
+          new Promise<void>((resolve, reject) => {
+            process.stdout.write(text, (error) =>
+              error ? reject(error) : resolve(),
+            );
+          }),
+        log,
+      });
+    if (config.mode === 'dryrun-browser')
+      await withBrowserReview(browser, controller, work, log);
+    else await work();
   } finally {
     try {
       await browser?.close();
