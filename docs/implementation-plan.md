@@ -19,8 +19,8 @@ submission after a crash. Account checkpoints and database errors stop processin
 
 `queue:reset-dryruns` requeues saved messages without regeneration.
 `queue:clear-messages` deletes messages and resets written profiles;
-`queue:clear-profiles` clears both tables. Browser modes reuse matching draft
-fields, preserve conflicts, and wait for browser closure after the batch.
+`queue:clear-profiles` clears both tables. Browser modes verify the selected recipient and fill the saved text directly,
+replacing existing draft contents. They wait for browser closure after the batch.
 See [the development guide](development.md) for the current contract and checks.
 
 ## Historical Product Plan

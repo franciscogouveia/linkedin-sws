@@ -7,7 +7,7 @@ import {
 import { SendOutcomeUnknownError } from '../src/shared/errors.ts';
 
 const baseline: SendState = {
-  matchingMessages: 0,
+  messageCount: 0,
   cleared: false,
   successNotices: 0,
   rejected: false,
@@ -16,7 +16,7 @@ const baseline: SendState = {
 test('sending requires new message evidence or a new explicit success notice', async () => {
   await confirmSend(
     baseline,
-    async () => ({ ...baseline, matchingMessages: 1, cleared: true }),
+    async () => ({ ...baseline, messageCount: 1, cleared: true }),
     new AbortController().signal,
     1,
   );
@@ -28,7 +28,7 @@ test('sending requires new message evidence or a new explicit success notice', a
   );
   for (const after of [
     { ...baseline, cleared: true },
-    { ...baseline, matchingMessages: 1 },
+    { ...baseline, messageCount: 1 },
   ]) {
     await assert.rejects(
       confirmSend(baseline, async () => after, new AbortController().signal, 1),
@@ -38,7 +38,7 @@ test('sending requires new message evidence or a new explicit success notice', a
 });
 
 test('previous messages and old toasts do not confirm a new send', async () => {
-  const previous = { ...baseline, matchingMessages: 1, successNotices: 1 };
+  const previous = { ...baseline, messageCount: 1, successNotices: 1 };
   await assert.rejects(
     confirmSend(
       previous,

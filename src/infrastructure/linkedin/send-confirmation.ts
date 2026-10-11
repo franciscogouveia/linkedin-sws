@@ -2,7 +2,7 @@ import { setTimeout } from 'node:timers/promises';
 import { SendOutcomeUnknownError } from '../../shared/errors.ts';
 
 export interface SendState {
-  matchingMessages: number;
+  messageCount: number;
   cleared: boolean;
   successNotices: number;
   rejected: boolean;
@@ -26,7 +26,7 @@ export async function confirmSend(
       );
     if (
       after.successNotices > before.successNotices ||
-      (after.cleared && after.matchingMessages > before.matchingMessages)
+      (after.cleared && after.messageCount > before.messageCount)
     )
       return;
     if (Date.now() >= deadline) break;

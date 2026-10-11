@@ -4,13 +4,11 @@ import type { LinkedInMessenger, MessagingStore } from '../shared/types.ts';
 import { failureReason, rethrowFatal } from '../shared/failure.ts';
 import { terminalText } from './terminal.ts';
 import { displayMessage } from './delivery.ts';
-import { hasMessagePlaceholders } from '../writing/llm.ts';
 
 export interface SendOptions {
   config: {
     mode: 'dryrun-terminal' | 'dryrun-browser' | 'live';
     max_profiles_per_run: number;
-    llm: { max_message_characters: number };
   };
   messages: MessagingStore;
   messenger?: LinkedInMessenger;
@@ -40,18 +38,6 @@ export async function runSend(options: SendOptions) {
       `Delivering saved message to ${terminalText(row.name)} (${terminalText(row.slug)}).`,
     );
     try {
-      if (
-        !row.message.trim() ||
-        row.message.length > config.llm.max_message_characters ||
-        hasMessagePlaceholders(row.message) ||
-        !row.subject.trim() ||
-        row.subject.length > 80 ||
-        /[\r\n]/.test(row.subject) ||
-        hasMessagePlaceholders(row.subject)
-      )
-        throw new ApplicationError(
-          'Saved message or subject failed validation.',
-        );
       if (config.mode === 'dryrun-terminal')
         await displayMessage(row, row.message, output, row.subject);
       else {

@@ -1,5 +1,5 @@
 /** Runs inside the browser; returns counts/flags without message text. */
-export function inspectSendState(input: { token: string; body: string }) {
+export function inspectSendState(input: { token: string }) {
   const visible = (node: Element) => {
     const rect = node.getBoundingClientRect();
     const style = getComputedStyle(node);
@@ -23,18 +23,13 @@ export function inspectSendState(input: { token: string; body: string }) {
     ),
   ].filter(visible);
   return {
-    matchingMessages: root
+    messageCount: root
       ? [
           ...root.querySelectorAll(
             '.msg-s-event-listitem__body, .msg-s-message-group__text, .msg-s-message__body, [data-message-body]',
           ),
-        ].filter(
-          (node) =>
-            visible(node) &&
-            !node.closest('[contenteditable]') &&
-            normalize((node as HTMLElement).innerText) ===
-              normalize(input.body),
-        ).length
+        ].filter((node) => visible(node) && !node.closest('[contenteditable]'))
+          .length
       : 0,
     cleared: bodyText !== undefined && normalize(bodyText) === '',
     successNotices: notices.filter((node) =>

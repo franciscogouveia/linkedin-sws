@@ -459,14 +459,14 @@ test('send does not click when saving the durable attempt fails', async (t) => {
   assert.equal(f.storage.messages.counts().new, 2);
 });
 
-test('invalid stored text is skipped without opening a composer', async (t) => {
+test('send delivers stored text without repeating writing-stage content validation', async (t) => {
   const f = await fixture(t);
   f.seedMessages();
   const row = f.storage.messages.next([])!;
-  let opened = false;
+  let filled = '';
   const result = await runSend({
     ...f.options,
-    config: { ...f.options.config, mode: 'live' },
+    config: { ...f.options.config, mode: 'dryrun-browser' },
     messages: {
       ...f.storage.messages,
       next: (excluded) =>
@@ -475,13 +475,15 @@ test('invalid stored text is skipped without opening a composer', async (t) => {
           : { ...row, message: '[Your Name]' },
     },
     messenger: {
-      openComposer: async () => {
-        opened = true;
-        throw new Error('Must not open');
-      },
+      openComposer: async () => ({
+        kind: 'chat',
+        fill: async (draft) => {
+          filled = draft.body;
+        },
+      }),
     },
   });
-  assert.equal(result.skipped, 1);
-  assert.equal(opened, false);
-  assert.equal(f.storage.messages.rows()[0]?.status, 'new');
+  assert.equal(filled, '[Your Name]');
+  assert.equal(result.completed, 1);
+  assert.equal(f.storage.messages.rows()[0]?.status, 'dryrun');
 });

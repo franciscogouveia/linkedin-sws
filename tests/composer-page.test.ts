@@ -13,9 +13,14 @@ function inspect(
   options: {
     name?: string;
     renderedName?: string;
+    plainName?: boolean;
+    mainOnly?: boolean;
+    titleOutsideWrapper?: boolean;
     selector?: string;
     editorLabel?: string;
     subject?: boolean;
+    bodyCount?: number;
+    subjectCount?: number;
     excludedName?: boolean;
     linkSlug?: string;
     headerLink?: boolean;
@@ -47,21 +52,45 @@ function inspect(
   link.closest = (selector: string) =>
     selector.startsWith('header,') && options.headerLink !== false ? {} : null;
   const root = {
+    tagName: options.mainOnly ? 'MAIN' : 'DIV',
     ...element(options.text ?? `${investor.name} Chat history. InMail`),
     querySelector: (selector: string) =>
       selector.includes('contenteditable') ? body : null,
     querySelectorAll: (selector: string) => {
-      if (selector.includes('subject')) return options.subject ? [subject] : [];
-      if (selector.includes('contenteditable')) return [body];
+      if (selector.includes('subject'))
+        return Array.from(
+          { length: options.subjectCount ?? (options.subject ? 1 : 0) },
+          () => subject,
+        );
+      if (selector.includes('contenteditable'))
+        return Array.from({ length: options.bodyCount ?? 1 }, () => body);
       if (selector.includes('a[href')) return options.linkSlug ? [link] : [];
-      if (selector.includes(options.selector ?? 'h2')) return [name];
+      if (selector === 'a, button, span, p, div')
+        return options.plainName && !options.titleOutsideWrapper ? [name] : [];
+      if (!options.plainName && selector.includes(options.selector ?? 'h2'))
+        return [name];
       return [];
     },
   };
+  if (options.titleOutsideWrapper) {
+    const pane = {
+      ...root,
+      parentElement: null,
+      querySelectorAll: (selector: string) =>
+        selector === 'a, button, span, p, div'
+          ? [name]
+          : selector.includes('contenteditable')
+            ? [body]
+            : [],
+    };
+    Object.assign(body, { parentElement: pane });
+  }
   const document = {
     querySelector: () => root,
     querySelectorAll: (selector: string) => {
       if (selector.includes('data-sws-')) return [];
+      if (selector === '[contenteditable="true"], textarea')
+        return options.titleOutsideWrapper ? [body] : [];
       if (
         selector.includes('[role="dialog"]') ||
         selector.includes('.msg-thread')
@@ -86,6 +115,7 @@ function inspect(
         kind?: string;
         composerCandidates?: {
           recipientNameMatches: number;
+          paneNameMatches: number;
           inmailEditorLabels: number;
         }[];
       }
@@ -190,4 +220,32 @@ test('diagnostics use the same visible-name matching as composer verification', 
   });
   assert.ok(result);
   assert.equal(result.composerCandidates?.[0]?.recipientNameMatches, 1);
+});
+
+test('ordinary text in the active pane verifies the recipient without a heading class', () => {
+  const result = inspect({ plainName: true });
+  assert.ok(result);
+  assert.equal(result.kind, 'chat');
+  const diagnostic = inspect({ plainName: true, report: true });
+  assert.ok(diagnostic);
+  assert.equal(diagnostic.composerCandidates?.[0]?.recipientNameMatches, 0);
+  assert.equal(diagnostic.composerCandidates?.[0]?.paneNameMatches, 1);
+});
+
+test('plain-text fallback excludes history, other names, and the broad message center', () => {
+  assert.equal(inspect({ plainName: true, excludedName: true }), false);
+  assert.equal(inspect({ plainName: true, name: 'Other Recipient' }), false);
+  assert.equal(inspect({ plainName: true, mainOnly: true }), false);
+});
+
+test('a verified recipient uses the first editor and subject without layout-count validation', () => {
+  const result = inspect({ bodyCount: 2, subjectCount: 2 });
+  assert.ok(result);
+  assert.equal(result.kind, 'inmail');
+});
+
+test('recipient text outside a named conversation wrapper is found through editor ancestors', () => {
+  const result = inspect({ plainName: true, titleOutsideWrapper: true });
+  assert.ok(result);
+  assert.equal(result.kind, 'chat');
 });

@@ -33,9 +33,9 @@ These files let founders express whom they want to reach and what they want to c
 
 - **`dryrun-terminal`:** Display generated messages in the terminal.
 - **`dryrun-browser`:** Open a separate tab per recipient and fill the message body, plus a subject for InMail. Review drafts, then close the browser to finish. The tool never presses Send.
-- **`live`:** Prepare and verify each message as in browser dry-run mode, then click Send and record confirmed messages as `sent`.
+- **`live`:** Verify the selected recipient and fill the saved message as in browser dry-run mode, then click Send and record confirmed messages as `sent`.
 
-Select the mode in `config.yaml`; no CLI arguments are required. Both dry-run modes record message status `dryrun`. `npm run queue:reset-dryruns` requeues those saved messages without regenerating them. Browser modes reuse matching drafts and preserve conflicting text. Preparation failures remain `new` for retry; submission failures remain `failed` for manual review. The browser stays open for inspection until you close it.
+Select the mode in `config.yaml`; no CLI arguments are required. Both dry-run modes record message status `dryrun`. `npm run queue:reset-dryruns` requeues those saved messages without regenerating them. Browser modes validate the selected recipient, then fill the saved text, replacing existing draft contents. Preparation failures remain `new` for retry; submission failures remain `failed` for manual review. The browser stays open for inspection until you close it.
 
 ## Run the Stages
 

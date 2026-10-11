@@ -95,19 +95,21 @@ Select `mode` in YAML; it affects delivery only:
 - **`dryrun-browser`:** Open a separate recipient tab, wait for the profile to load,
   open its Message action, verify the recipient, and prepare the saved body.
   InMail also receives the saved subject; ordinary chats ignore it. Record `dryrun`
-  after readback verification. No Send click or Enter submission occurs.
-- **`live`:** Prepare and verify as above, then click one enabled Send button
+  after the recipient is verified and filling completes. No Send click or Enter submission occurs.
+- **`live`:** Verify the recipient and fill as above, then click Send
   inside the verified composer. Record `sent` only after browser UI confirmation.
   Selecting live mode authorizes sending up to the configured attempt limit.
 
-Matching nonempty fields are reused; empty fields are filled. Conflicting drafts
-are preserved and cause a retryable preparation failure. Readback accepts rich-text
-whitespace differences, but changed words, subjects, or recipients fail validation.
-Failures before submission leave messages `new`; they do not block later recipients.
-An explicit messaging restriction also remains retryable as a preparation failure.
+The only browser validation before filling or sending is whether the selected
+recipient matches the profile slug, or name when no header slug is available.
+The saved body and optional InMail subject are filled directly, replacing existing
+draft contents. The tool does not validate draft text, compare readback, or check
+chat-history contents. Message and subject quality checks belong to `dev:write`.
+Failures to locate or fill the selected recipient's editor leave messages `new`
+and continue to later recipients.
 
 Immediately before clicking Send, SQLite commits a reserved failed marker. A new
-sent notice, or a newly displayed matching message plus an empty editor, confirms
+sent notice, or an increased displayed-message count plus an empty editor, confirms
 submission. An empty editor alone does not. Successful confirmation promotes the
 marker to `sent`. A click error, confirmation timeout, interruption, or crash leaves
 `failed`, preventing automatic duplicate sends. Inspect the LinkedIn conversation
@@ -179,7 +181,7 @@ See [config.example.yaml](../config.example.yaml) for all fields. Unknown keys a
 | `llm.structured_output`                            | Request schema-constrained classification; returned JSON is always validated. |
 | `llm.timeout_ms`                                   | Per-request timeout; default 60000 ms, maximum 300000 ms.                     |
 | `llm.max_output_tokens`                            | Output budget per request, including model reasoning where applicable.        |
-| `llm.max_message_characters`                       | Generated and saved delivery text must fit this limit.                        |
+| `llm.max_message_characters`                       | Generated messages must fit this limit.                                       |
 
 Other search filters and Sales Navigator are outside this prototype. Send and
 maintenance still validate the complete YAML, but do not contact the configured LLM.
@@ -246,10 +248,13 @@ labels for each visible message container, including the full message center.
 Composer detection requires a matching recipient header slug (or exact active
 recipient name when no header slug is available) and one message editor.
 Name matching ignores hidden accessibility text, zero-width formatting, and known
-connection-degree or presence labels, while still rejecting different full names. Other
+connection-degree or presence labels, while still rejecting different full names. The active conversation pane also supports ordinary recipient text without
+heading tags or specific classes. This fallback excludes the conversation list,
+editor, and history as identity sources; it does not inspect chat content or
+require a particular position relative to history. Arbitrary names elsewhere in the message center do not
+verify a recipient. `paneNameMatches` reports this fallback in diagnostics. Other
 profile links and UI labels do not reject the composer. An available subject
-field identifies InMail; other forms are prepared as chats. Draft readback and
-recipient verification before live sending remain in place. Browser failures preserve the first
+field identifies InMail; other forms are prepared as chats. Recipient identity is checked before filling and before live sending. Browser failures preserve the first
 line of the underlying error; the workflow reports the resulting row status.
 
 LinkedIn layouts change; fixture checks cannot prove compatibility with a live
@@ -282,7 +287,6 @@ unavailable. Tests never use your LinkedIn login or incur LLM charges.
 
 For manual verification, run search and inspect profiles and their validation
 reasons; run write and inspect saved subjects/bodies; then run terminal send.
-Reset dry runs and test browser delivery, including matching and conflicting
-existing drafts. Verify that all eligible recipients get tabs before browser review.
+Reset dry runs and test browser delivery, including replacing existing drafts. Verify that all eligible recipients get tabs before browser review.
 For live testing, choose eligible recipients and a small limit, then inspect the
 conversation and saved status before any reset or clear operation.

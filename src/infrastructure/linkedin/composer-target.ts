@@ -75,10 +75,6 @@ export async function waitForComposer(
           throw error;
       }
     }
-    if (matches.length > 1)
-      throw new ApplicationError(
-        'Multiple recipient message composers found. Review the browser.',
-      );
     if (matches[0]) return matches[0];
     if (pages().every((page) => page.isClosed()))
       throw new ApplicationError('Recipient message tab was closed.');

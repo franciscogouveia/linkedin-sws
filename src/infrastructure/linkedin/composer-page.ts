@@ -57,13 +57,33 @@ export function inspectComposer(input: {
     const main = document.querySelector('main, [role="main"]');
     if (main && visible(main)) roots.push(main);
   }
+  // In the message center, use the editor's ancestors as candidate panes too.
+  // The recipient title can be outside LinkedIn's named conversation wrapper.
+  if (location.pathname.startsWith('/messaging/')) {
+    for (const editor of [
+      ...document.querySelectorAll('[contenteditable="true"], textarea'),
+    ].filter(visible)) {
+      for (
+        let pane = editor.parentElement;
+        pane && pane !== document.body;
+        pane = pane.parentElement
+      ) {
+        if (!roots.includes(pane)) roots.push(pane);
+        if (
+          pane.tagName.toLowerCase() === 'main' ||
+          pane.getAttribute('role') === 'main'
+        )
+          break;
+      }
+    }
+  }
   const matches: { root: Element; body: Element; subject?: Element }[] = [];
   for (const root of roots) {
     // Links in the generated draft or conversation history do not identify the
     // recipient. Prefer the conversation header when its profile link exists.
     const outsideMessage = (node: Element) =>
       !node.closest(
-        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
+        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, [role="log"], .msg-s-message-list-container, .msg-s-message-list-content, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
       );
     const profileLinks = [...root.querySelectorAll('a[href*="/in/"]')].filter(
       (node) => visible(node) && outsideMessage(node),
@@ -94,7 +114,25 @@ export function inspectComposer(input: {
         'h1, h2, h3, [role="heading"], header a, header button, header span, .msg-overlay-bubble-header__title, .msg-thread__link-to-profile, .msg-thread__heading, .msg-thread__topic, .msg-entity-lockup__entity-title, .msg-entity-lockup__entity-title > span, .msg-form__recipient, .msg-connections-typeahead__recipient, [data-recipient-name]',
       ),
     ].filter((node) => visible(node) && outsideMessage(node));
-    if (links.length ? !matchingSlug : !names.some(matchesName)) continue;
+    // The active pane may render the recipient as an ordinary span/div rather
+    // than a heading. Search its non-history text instead of guessing classes.
+    // Keep the whole message-center fallback restricted to semantic headings;
+    // arbitrary names elsewhere in main cannot identify the active recipient.
+    const isMain =
+      root.tagName?.toLowerCase() === 'main' ||
+      root.getAttribute('role') === 'main';
+    const paneNames = isMain
+      ? []
+      : [...root.querySelectorAll('a, button, span, p, div')].filter(
+          (node) =>
+            visible(node) &&
+            outsideMessage(node) &&
+            (node.textContent ?? '').length <= 200,
+        );
+    if (
+      links.length ? !matchingSlug : ![...names, ...paneNames].some(matchesName)
+    )
+      continue;
     const subjects = [
       ...root.querySelectorAll(
         'input[name*="subject" i], input[placeholder*="subject" i], input[aria-label*="subject" i], textarea[name*="subject" i], textarea[placeholder*="subject" i]',
@@ -110,7 +148,7 @@ export function inspectComposer(input: {
           node.getAttribute('aria-label') ?? '',
         ),
     );
-    if (subjects.length > 1 || bodies.length !== 1) continue;
+    if (!bodies.length) continue;
     // A subject field identifies InMail. UI labels and container text are hints,
     // not extra gates: one recipient-owned editor is enough to prepare a draft.
     matches.push({
@@ -124,25 +162,7 @@ export function inspectComposer(input: {
     (match, index) =>
       matches.findIndex((other) => other.body === match.body) === index,
   );
-  if (!unique.length) {
-    const blocked =
-      /(?:upgrade|premium|purchase|buy).{0,80}(?:inmail|message)|(?:inmail|messag(?:e|ing)).{0,80}(?:upgrade|premium required|not available|unavailable|cannot|can't|not allowed)|out of inmail credits|(?:cannot|can't|unable to|not allowed to) (?:send (?:a )?(?:message|inmail)|message)/i;
-    for (const root of roots) {
-      const text = root.textContent ?? '';
-      if (
-        blocked.test(text) &&
-        !root.querySelector('[contenteditable="true"], textarea')
-      ) {
-        return {
-          kind: 'unavailable' as const,
-          reason:
-            'LinkedIn messaging unavailable or requires an upgrade/credits',
-        };
-      }
-    }
-    return false;
-  }
-  if (unique.length !== 1) return false;
+  if (!unique.length) return false;
   const match = unique[0]!;
   // React can replace the editor or move from InMail to a conversation thread.
   // Remove stale markers so field/button locators keep one recipient-owned target.
@@ -287,7 +307,7 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
       .map((root) => {
         const outsideMessage = (node: Element) =>
           !node.closest(
-            '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
+            '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, [role="log"], .msg-s-message-list-container, .msg-s-message-list-content, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
           );
         const names = [
           ...root.querySelectorAll(
@@ -300,8 +320,21 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
         const fields = [
           ...root.querySelectorAll('[contenteditable="true"], textarea'),
         ].filter(visible);
+        const isMain =
+          root.tagName?.toLowerCase() === 'main' ||
+          root.getAttribute('role') === 'main';
+        const paneNames = isMain
+          ? []
+          : [...root.querySelectorAll('a, button, span, p, div')].filter(
+              (node) =>
+                visible(node) &&
+                outsideMessage(node) &&
+                (node.textContent ?? '').length <= 200,
+            );
         return {
           recipientNameCandidates: names.length,
+          paneNameCandidates: paneNames.length,
+          paneNameMatches: paneNames.filter(matchesName).length,
           recipientNameMatches: names.filter(matchesName).length,
           recipientProfileLinks: links.length,
           recipientSlugMatches: links.filter((node) => {
