@@ -115,6 +115,51 @@ test(
         await context.close();
       });
     }
+    await t.test(
+      'rich-text paragraph rendering and draft profile links preserve verification',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        await context.route('**/*', (route) =>
+          route.fulfill({ contentType: 'text/html', body: fixture('inmail') }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        await context.pages()[0]!.evaluate(() => {
+          const editor =
+            document.querySelector<HTMLElement>('[contenteditable]')!;
+          editor.addEventListener('input', () => {
+            const text = editor.innerText;
+            editor.replaceChildren();
+            for (const line of text.split('\n')) {
+              const paragraph = document.createElement('p');
+              paragraph.textContent = line || '\u00a0';
+              editor.append(paragraph);
+            }
+            const signature = editor.lastElementChild!;
+            const link = document.createElement('a');
+            link.href = 'https://www.linkedin.com/in/founder-example/';
+            link.textContent = signature.textContent;
+            signature.replaceChildren(link);
+          });
+        });
+        await composer.fill({
+          body: 'Hello Alex,\n\nCould we discuss funding?\nhttps://www.linkedin.com/in/founder-example/',
+          subject: 'Funding Acme',
+        });
+        assert.equal(
+          await context
+            .pages()[0]!
+            .evaluate(() => (window as unknown as { sent: number }).sent),
+          0,
+        );
+        await context.close();
+      },
+    );
     await t.test('nonempty draft is untouched', async () => {
       const context = await browser.newContext();
       context.setDefaultTimeout(500);

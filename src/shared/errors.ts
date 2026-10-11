@@ -3,3 +3,5 @@ export class ApplicationError extends Error {
 }
 
 export class MessagingUnavailableError extends ApplicationError {}
+
+export class DraftVerificationError extends ApplicationError {}

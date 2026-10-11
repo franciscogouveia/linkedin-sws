@@ -17,6 +17,7 @@ import { inspectProfilePage } from './profile-page.ts';
 import { inspectComposer, composerLayoutReport } from './composer-page.ts';
 import { waitForComposer, visibleComposerFrames } from './composer-target.ts';
 import { composerFailure } from './composer-errors.ts';
+import { verifyDraft } from './draft-verification.ts';
 import { hasMessagePlaceholders } from '../../writing/llm.ts';
 
 async function fieldText(field: Locator): Promise<string> {
@@ -26,7 +27,6 @@ async function fieldText(field: Locator): Promise<string> {
       : (node as HTMLElement).innerText,
   );
 }
-const normalized = (text: string) => text.replace(/\r\n/g, '\n');
 
 export class LinkedInMessengerBrowser implements LinkedInMessenger {
   private readonly context: BrowserContext;
@@ -153,19 +153,23 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
           await body.fill(draft.body);
           this.signal.throwIfAborted();
           await assertLinkedInPage(messagePage);
-          const verified = await target.evaluate(inspectComposer, input);
-          if (
-            !verified ||
-            verified.kind !== kind ||
-            normalized(await fieldText(body)) !== normalized(draft.body) ||
-            (kind === 'inmail' &&
-              normalized(await fieldText(subject)) !==
-                normalized(draft.subject!))
-          ) {
-            throw new ApplicationError(
-              'Draft text or recipient could not be verified after filling. Queue row remains working.',
-            );
-          }
+          await verifyDraft(
+            draft,
+            async () => {
+              const verified = await target.evaluate(inspectComposer, input);
+              if (!verified || verified.kind !== kind)
+                return { recipientVerified: false };
+              return {
+                recipientVerified: true,
+                body: await fieldText(body),
+                ...(kind === 'inmail'
+                  ? { subject: await fieldText(subject) }
+                  : {}),
+              };
+            },
+            this.signal,
+            Math.min(this.timeout, 2_000),
+          );
         },
       };
     } catch (error) {

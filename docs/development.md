@@ -95,9 +95,15 @@ tabs opened by that action, and visible LinkedIn frames, verifies the composer r
 and fills an empty body. InMail also receives an LLM-generated subject of at most
 80 characters. Subjects and bodies must pass placeholder validation.
 
-Text is read back before recording `dryrun`. The tool never clicks Send, submits
+Text is read back before recording `dryrun`. Rich-text whitespace differences
+(paragraph breaks, trailing blank lines, and nonbreaking spaces) are accepted;
+changed words, punctuation, subjects, or recipients fail verification. Editor
+rendering is allowed a short settling period. A verification failure logs the
+reason, records that row as `failed`, preserves its draft tab, and continues to
+the next profile. The tool never clicks Send, submits
 the form, or presses Enter. Existing nonempty body or subject fields are preserved;
-ambiguous recipients/layouts and transient errors stop with the row `working`.
+ambiguous recipients/layouts before filling and other transient errors stop with
+the row `working`.
 An explicit messaging restriction or upgrade/credit requirement records `failed`
 and continues to the next row. Missing Message controls without a clear restriction
 stop for manual review rather than guessing eligibility.

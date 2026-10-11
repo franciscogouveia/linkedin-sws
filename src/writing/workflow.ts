@@ -1,6 +1,7 @@
 import {
   ApplicationError,
   MessagingUnavailableError,
+  DraftVerificationError,
 } from '../shared/errors.ts';
 import type {
   LinkedInReader,
@@ -106,9 +107,15 @@ export async function runMessages(options: MessageOptions) {
         log(`Draft prepared for ${terminalText(row.name)}; no message sent.`);
       } catch (error) {
         signal.throwIfAborted();
-        if (!(error instanceof MessagingUnavailableError)) throw error;
+        if (
+          !(error instanceof MessagingUnavailableError) &&
+          !(error instanceof DraftVerificationError)
+        )
+          throw error;
         queue.finish(row.id, 'failed', error.message);
-        log(`${terminalText(error.message)}; recorded failed.`);
+        log(
+          `${terminalText(row.name)} (${terminalText(row.slug)}): ${terminalText(error.message)}; recorded failed. Continuing to the next profile.`,
+        );
         continue;
       }
     }

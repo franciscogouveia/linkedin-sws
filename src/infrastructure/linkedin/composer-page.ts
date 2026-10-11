@@ -41,7 +41,21 @@ export function inspectComposer(input: {
   }
   const matches: { root: Element; body: Element; subject?: Element }[] = [];
   for (const root of roots) {
-    const links = [...root.querySelectorAll('a[href*="/in/"]')].filter(visible);
+    // Links in the generated draft or conversation history do not identify the
+    // recipient. Prefer the conversation header when its profile link exists.
+    const outsideMessage = (node: Element) =>
+      !node.closest(
+        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav',
+      );
+    const profileLinks = [...root.querySelectorAll('a[href*="/in/"]')].filter(
+      (node) => visible(node) && outsideMessage(node),
+    );
+    const headerLinks = profileLinks.filter((node) =>
+      node.closest(
+        'header, h1, h2, h3, [role="heading"], .msg-overlay-bubble-header, .msg-thread__top-card, .msg-thread__link-to-profile',
+      ),
+    );
+    const links = headerLinks.length ? headerLinks : profileLinks;
     const matchingSlug =
       links.length > 0 &&
       links.every((link) => {
@@ -60,7 +74,7 @@ export function inspectComposer(input: {
       ...root.querySelectorAll(
         'h1, h2, h3, [role="heading"], .msg-overlay-bubble-header__title, .msg-conversation-listitem__participant-names, .msg-thread__link-to-profile, [data-recipient-name]',
       ),
-    ].filter(visible);
+    ].filter((node) => visible(node) && outsideMessage(node));
     if (
       links.length
         ? !matchingSlug

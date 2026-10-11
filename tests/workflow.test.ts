@@ -381,3 +381,41 @@ test('browser closure during fill leaves the selected row working', async (t) =>
   );
   assert.equal(storage.queue.rows()[0]?.status, 'working');
 });
+
+test('draft verification failures are recorded failed and the browser batch continues to the next profile', async (t) => {
+  const { DraftVerificationError } = await import('../src/shared/errors.ts');
+  const { options, storage, output } = await setup(t);
+  options.config.mode = 'dryrun-browser';
+  options.config.max_profiles_per_run = 10;
+  for (let i = 0; i < 3; i++)
+    storage.queue.append({ ...investor, slug: `investor-${i}` });
+  const logs: string[] = [];
+  options.log = (text) => logs.push(text);
+  const opened: string[] = [];
+  const messenger = {
+    openComposer: async (recipient: typeof investor) => {
+      opened.push(recipient.slug);
+      return {
+        kind: 'inmail' as const,
+        fill: async () => {
+          if (recipient.slug === 'investor-0')
+            throw new DraftVerificationError(
+              'Draft verification failed: message body differs',
+            );
+        },
+      };
+    },
+  };
+  assert.deepEqual(await runMessages({ ...options, messenger }), {
+    processed: 3,
+    displayed: 2,
+  });
+  assert.deepEqual(opened, ['investor-0', 'investor-1', 'investor-2']);
+  assert.deepEqual(
+    storage.queue.rows().map((row) => row.status),
+    ['failed', 'dryrun', 'dryrun'],
+  );
+  assert.match(storage.queue.rows()[0]!.failure, /message body differs/);
+  assert.match(logs.join('\n'), /Continuing to the next profile/);
+  assert.equal(output.length, 0);
+});
