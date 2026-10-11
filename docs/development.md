@@ -89,7 +89,9 @@ Do not commit that file if it contains personal information or private pitches.
 
 Set `mode: dryrun-browser` in `config.yaml`, then run `npm run dev:message`
 (or `npm run dev` to search first). Each qualifying recipient gets a separate
-profile tab. The tool opens their Message action, verifies the composer recipient,
+profile tab. After waiting for the full profile page load, the tool opens their Message action
+(or follows its standard LinkedIn messaging link). It checks the recipient tab,
+tabs opened by that action, and visible LinkedIn frames, verifies the composer recipient,
 and fills an empty body. InMail also receives an LLM-generated subject of at most
 80 characters. Subjects and bodies must pass placeholder validation.
 
@@ -114,7 +116,7 @@ rows does not clear LinkedIn drafts, so review existing drafts before retesting.
 Composer failures report the stage and first line of the underlying browser error.
 `composer-layout-*.json` reports beside the browser session record whether the
 Message click completed, visible versus hidden dialogs, editor and frame counts,
-and Message control types. They contain no message text, profile identifiers, or
+Message control types, popup tab counts, and per-frame layout reports. They contain no message text, profile identifiers, or
 full URLs. A dialog count alone does not establish that a composer opened.
 
 ## Configuration

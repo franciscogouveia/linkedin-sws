@@ -15,6 +15,7 @@ import type {
 import { assertLinkedInPage, profileSlug } from './page.ts';
 import { inspectProfilePage } from './profile-page.ts';
 import { inspectComposer, composerLayoutReport } from './composer-page.ts';
+import { waitForComposer, visibleComposerFrames } from './composer-target.ts';
 import { composerFailure } from './composer-errors.ts';
 import { hasMessagePlaceholders } from '../../writing/llm.ts';
 
@@ -30,12 +31,15 @@ const normalized = (text: string) => text.replace(/\r\n/g, '\n');
 export class LinkedInMessengerBrowser implements LinkedInMessenger {
   private readonly context: BrowserContext;
   private readonly signal: AbortSignal;
+  private readonly timeout: number;
   private readonly diagnosticsDirectory: string | undefined;
   constructor(
     context: BrowserContext,
     signal: AbortSignal,
     diagnosticsDirectory?: string,
+    timeout = 30_000,
   ) {
+    this.timeout = timeout;
     this.context = context;
     this.signal = signal;
     this.diagnosticsDirectory = diagnosticsDirectory;
@@ -46,6 +50,11 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
     const page = await this.context.newPage();
     let stage = 'opening recipient profile';
     let action = 'not attempted';
+    const popups: Page[] = [];
+    const onPopup = (popup: Page) => {
+      popups.push(popup);
+    };
+    page.on('popup', onPopup);
     try {
       await page.bringToFront();
       const response = await page.goto(
@@ -77,22 +86,25 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       } finally {
         await profile.dispose();
       }
+      stage = 'waiting for profile page load';
+      await page.waitForLoadState('load');
+      this.signal.throwIfAborted();
       stage = 'opening profile Message action';
       await this.openMessageAction(page, recipient, (value) => {
         action = value;
       });
-      stage = 'waiting for message composer after clicking Message';
+      stage = 'waiting for message composer after opening Message';
       const token = randomUUID();
       const input = { name: recipient.name, slug: recipient.slug, token };
-      const handle = await page.waitForFunction(inspectComposer, input);
-      let state;
-      try {
-        state = await handle.jsonValue();
-      } finally {
-        await handle.dispose();
-      }
+      const { frame: target, state } = await waitForComposer(
+        () => [page, ...popups],
+        input,
+        this.signal,
+        this.timeout,
+      );
+      const messagePage = target.page();
       this.signal.throwIfAborted();
-      await assertLinkedInPage(page);
+      await assertLinkedInPage(messagePage);
       if (!state || typeof state !== 'object')
         throw new ApplicationError(
           'Cannot verify the messaging composer. Queue row remains working.',
@@ -100,8 +112,8 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       if (state.kind === 'unavailable')
         throw new MessagingUnavailableError(state.reason);
       const kind = state.kind;
-      const body = page.locator(`[data-sws-body="${token}"]`);
-      const subject = page.locator(`[data-sws-subject="${token}"]`);
+      const body = target.locator(`[data-sws-body="${token}"]`);
+      const subject = target.locator(`[data-sws-subject="${token}"]`);
       return {
         kind,
         fill: async (draft: MessageDraft) => {
@@ -119,8 +131,8 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
               'Draft text or InMail subject is invalid. Queue row remains working.',
             );
           }
-          await assertLinkedInPage(page);
-          const current = await page.evaluate(inspectComposer, input);
+          await assertLinkedInPage(messagePage);
+          const current = await target.evaluate(inspectComposer, input);
           if (!current || current.kind !== kind)
             throw new ApplicationError(
               'Draft recipient or composer changed. Queue row remains working.',
@@ -140,8 +152,8 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
           // fill changes field text only. Never submit, press Enter, or click Send.
           await body.fill(draft.body);
           this.signal.throwIfAborted();
-          await assertLinkedInPage(page);
-          const verified = await page.evaluate(inspectComposer, input);
+          await assertLinkedInPage(messagePage);
+          const verified = await target.evaluate(inspectComposer, input);
           if (
             !verified ||
             verified.kind !== kind ||
@@ -159,7 +171,11 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
     } catch (error) {
       this.signal.throwIfAborted();
       if (error instanceof MessagingUnavailableError) {
-        await page.close();
+        await Promise.all(
+          [page, ...popups]
+            .filter((tab) => !tab.isClosed())
+            .map((tab) => tab.close()),
+        );
         throw error;
       }
       if (!page.isClosed()) await assertLinkedInPage(page);
@@ -168,10 +184,13 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         stage,
         action,
         recipient,
+        popups,
       );
       throw new ApplicationError(
-        `${error instanceof ApplicationError ? error.message : composerFailure(error, stage, recipient)}${diagnostic}`,
+        `${error instanceof ApplicationError ? `${error.message} Stage: ${stage}.` : composerFailure(error, stage, recipient)}${diagnostic}`,
       );
+    } finally {
+      page.removeListener('popup', onPopup);
     }
   }
 
@@ -180,6 +199,7 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
     stage: string,
     action: string,
     recipient: Investor,
+    popups: Page[],
   ): Promise<string> {
     if (!this.diagnosticsDirectory || page.isClosed()) return '';
     try {
@@ -187,7 +207,28 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         name: recipient.name,
         slug: recipient.slug,
       });
-      const report = { stage, action, ...layout };
+      const frameReports = [];
+      for (const frame of await visibleComposerFrames([page, ...popups])) {
+        try {
+          frameReports.push({
+            location: frame === frame.page().mainFrame() ? 'page' : 'frame',
+            popup: frame.page() !== page,
+            ...(await frame.evaluate(composerLayoutReport, {
+              name: recipient.name,
+              slug: recipient.slug,
+            })),
+          });
+        } catch {
+          frameReports.push({ unreadable: true });
+        }
+      }
+      const report = {
+        stage,
+        action,
+        ...layout,
+        popupTabs: popups.filter((tab) => !tab.isClosed()).length,
+        frameReports,
+      };
       await mkdir(this.diagnosticsDirectory, { recursive: true, mode: 0o700 });
       const path = join(
         this.diagnosticsDirectory,
@@ -228,6 +269,29 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       )
       .filter({ visible: true });
     if ((await action.count()) === 1 && (await action.isEnabled())) {
+      await action.waitFor({ state: 'visible' });
+      // Follow a normal LinkedIn messaging anchor directly. Some profile layouts
+      // leave its SPA click handler inert even though the link is actionable.
+      const href = await action.getAttribute('href');
+      if (href) {
+        const url = new URL(href, page.url());
+        if (
+          ['linkedin.com', 'www.linkedin.com'].includes(url.hostname) &&
+          url.protocol === 'https:' &&
+          url.pathname.startsWith('/messaging/')
+        ) {
+          recordAction('following profile LinkedIn messaging link');
+          const response = await page.goto(url.href, {
+            waitUntil: 'domcontentloaded',
+          });
+          if (response && response.status() >= 400)
+            throw new ApplicationError(
+              `LinkedIn messaging returned HTTP ${response.status()}. Queue row remains working.`,
+            );
+          recordAction('profile LinkedIn messaging link followed');
+          return;
+        }
+      }
       recordAction('clicking profile Message control');
       await action.click();
       recordAction('profile Message control clicked');

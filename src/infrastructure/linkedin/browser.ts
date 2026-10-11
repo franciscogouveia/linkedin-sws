@@ -290,6 +290,7 @@ export async function openLinkedIn(
         context,
         signal,
         join(dirname(settings.session_dir), 'diagnostics'),
+        settings.timeout_ms,
       ),
       reader: new LinkedInBrowser(
         page,

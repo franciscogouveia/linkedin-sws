@@ -43,6 +43,8 @@ test('composer errors identify profile wait, Message click, and composer wait se
         innerText: async () => 'Profile',
         allTextContents: async () => [],
         isEnabled: async () => true,
+        waitFor: async () => {},
+        getAttribute: async () => null,
         click: async () => {
           if (stage === 'click') throw timeout;
           clicked = true;
@@ -54,6 +56,9 @@ test('composer errors identify profile wait, Message click, and composer wait se
         filter: () => locator,
       };
       const page = {
+        on: () => {},
+        removeListener: () => {},
+        waitForLoadState: async () => {},
         bringToFront: async () => {},
         goto: async () => ({ status: () => 200 }),
         url: () => `https://www.linkedin.com/in/${investor.slug}/`,
@@ -66,6 +71,7 @@ test('composer errors identify profile wait, Message click, and composer wait se
             dispose: async () => {},
           };
         },
+        frames: () => [],
         evaluate: async () => ({
           dialogs: 2,
           visibleDialogs: 0,
@@ -80,17 +86,19 @@ test('composer errors identify profile wait, Message click, and composer wait se
           ? 'waiting for recipient profile'
           : stage === 'click'
             ? 'opening profile Message action'
-            : 'waiting for message composer after clicking Message';
+            : 'waiting for message composer after opening Message';
       await assert.rejects(
         new LinkedInMessengerBrowser(
           context,
           new AbortController().signal,
           directory,
+          1,
         ).openComposer(investor),
         (error) => {
           assert.ok(error instanceof Error);
           assert.ok(error.message.includes(expected));
-          assert.match(error.message, /TimeoutError/);
+          if (stage !== 'composer') assert.match(error.message, /TimeoutError/);
+          else assert.match(error.message, /no recognized recipient editor/);
           return true;
         },
       );
@@ -109,4 +117,70 @@ test('composer errors identify profile wait, Message click, and composer wait se
       assert.equal(clicked, stage === 'composer');
     });
   }
+});
+
+test('a standard messaging anchor is followed after full profile load without an inert click', async () => {
+  const events: string[] = [];
+  let url = `https://www.linkedin.com/in/${investor.slug}/`;
+  const locator = {
+    count: async () => 1,
+    innerText: async () => 'Page',
+    allTextContents: async () => [],
+    isEnabled: async () => true,
+    waitFor: async () => {},
+    getAttribute: async () => '/messaging/compose/?recipient=example',
+    click: async () => {
+      throw new Error('The messaging anchor should be followed');
+    },
+    first: () => locator,
+    getByRole: () => locator,
+    or: () => locator,
+    and: () => locator,
+    filter: () => locator,
+  };
+  const frame = {
+    url: () => url,
+    parentFrame: () => null,
+    isDetached: () => false,
+    evaluate: async () => ({ kind: 'chat' }),
+    page: () => page,
+    locator: () => locator,
+  };
+  const page = {
+    on: () => {},
+    removeListener: () => {},
+    bringToFront: async () => {},
+    goto: async (next: string) => {
+      url = next;
+      events.push(
+        next.includes('/messaging/')
+          ? 'messaging navigation'
+          : 'profile navigation',
+      );
+      return { status: () => 200 };
+    },
+    waitForLoadState: async (state: string) => {
+      assert.equal(state, 'load');
+      events.push('full profile load');
+    },
+    url: () => url,
+    isClosed: () => false,
+    locator: () => locator,
+    frames: () => [frame],
+    waitForFunction: async () => ({
+      jsonValue: async () => ({ kind: 'profile', name: investor.name }),
+      dispose: async () => {},
+    }),
+  };
+  const context = { newPage: async () => page } as unknown as BrowserContext;
+  const composer = await new LinkedInMessengerBrowser(
+    context,
+    new AbortController().signal,
+  ).openComposer(investor);
+  assert.equal(composer.kind, 'chat');
+  assert.deepEqual(events, [
+    'profile navigation',
+    'full profile load',
+    'messaging navigation',
+  ]);
 });

@@ -41,6 +41,8 @@ test(
         const messenger = new LinkedInMessengerBrowser(
           context,
           new AbortController().signal,
+          undefined,
+          500,
         );
         const first = await messenger.openComposer(investor);
         await first.fill({
@@ -63,6 +65,56 @@ test(
         await context.close();
       });
     }
+    for (const layout of ['link', 'frame', 'popup'] as const) {
+      await t.test(`messaging in ${layout}`, async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(1_000);
+        const composerHtml = `<main><div class="msg-thread"><h2><a href="/in/${investor.slug}/">${investor.name}</a></h2><textarea aria-label="Write a message"></textarea><button id="send">Send</button></div></main><script>window.sent = 0; document.querySelector('#send').onclick = () => window.sent++;</script>`;
+        const profileHtml =
+          layout === 'link'
+            ? header.replace(
+                '<button id="message">Message</button>',
+                '<a id="message" href="/messaging/thread/test/">Message</a>',
+              ) +
+              '<script>document.querySelector("#message").onclick = (event) => event.preventDefault();</script>'
+            : header +
+              `<script>document.querySelector('#message').onclick = () => { ${layout === 'frame' ? 'const frame = document.createElement("iframe"); frame.src = "/messaging/thread/test/"; document.body.append(frame);' : 'window.open("/messaging/thread/test/");'} };</script>`;
+        await context.route('**/*', (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: new URL(route.request().url()).pathname.startsWith(
+              '/messaging/',
+            )
+              ? composerHtml
+              : profileHtml,
+          }),
+        );
+        const messenger = new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          1_000,
+        );
+        const composer = await messenger.openComposer(investor);
+        await composer.fill({ body: 'Funding Acme' });
+        const targetPage =
+          layout === 'popup' ? context.pages()[1]! : context.pages()[0]!;
+        const target = targetPage
+          .frames()
+          .find((frame) => frame.url().includes('/messaging/'))!;
+        assert.equal(
+          await target.locator('textarea').inputValue(),
+          'Funding Acme',
+        );
+        assert.equal(
+          await target.evaluate(
+            () => (window as unknown as { sent: number }).sent,
+          ),
+          0,
+        );
+        await context.close();
+      });
+    }
     await t.test('nonempty draft is untouched', async () => {
       const context = await browser.newContext();
       context.setDefaultTimeout(500);
@@ -75,6 +127,8 @@ test(
       const composer = await new LinkedInMessengerBrowser(
         context,
         new AbortController().signal,
+        undefined,
+        500,
       ).openComposer(investor);
       await assert.rejects(
         composer.fill({ body: 'Replacement' }),
@@ -99,8 +153,10 @@ test(
         new LinkedInMessengerBrowser(
           context,
           new AbortController().signal,
+          undefined,
+          100,
         ).openComposer(investor),
-        /waiting for message composer after clicking Message/,
+        /waiting for message composer after opening Message/,
       );
       assert.equal(
         await context.pages()[0]!.locator('[contenteditable]').innerText(),
@@ -123,6 +179,8 @@ test(
           new LinkedInMessengerBrowser(
             context,
             new AbortController().signal,
+            undefined,
+            500,
           ).openComposer(investor),
           /requires an upgrade/,
         );
