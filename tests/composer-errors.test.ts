@@ -119,7 +119,7 @@ test('composer errors identify profile wait, Message click, and composer wait se
   }
 });
 
-test('a standard messaging anchor is followed after full profile load without an inert click', async () => {
+test('a verified profile slug permits display-name differences and follows its anchor after full load', async () => {
   const events: string[] = [];
   let url = `https://www.linkedin.com/in/${investor.slug}/`;
   const locator = {
@@ -168,7 +168,10 @@ test('a standard messaging anchor is followed after full profile load without an
     locator: () => locator,
     frames: () => [frame],
     waitForFunction: async () => ({
-      jsonValue: async () => ({ kind: 'profile', name: investor.name }),
+      jsonValue: async () => ({
+        kind: 'profile',
+        name: `${investor.name}, PhD`,
+      }),
       dispose: async () => {},
     }),
   };
@@ -183,4 +186,90 @@ test('a standard messaging anchor is followed after full profile load without an
     'full profile load',
     'messaging navigation',
   ]);
+});
+
+test('account guard errors retain their fatal type across composer diagnostics', async () => {
+  const { LinkedInSessionError } = await import('../src/shared/errors.ts');
+  const checkpoint = new LinkedInSessionError('Account checkpoint');
+  const page = {
+    on: () => {},
+    removeListener: () => {},
+    bringToFront: async () => {
+      throw checkpoint;
+    },
+    isClosed: () => true,
+  } as unknown as Page;
+  const context = { newPage: async () => page } as unknown as BrowserContext;
+  await assert.rejects(
+    new LinkedInMessengerBrowser(
+      context,
+      new AbortController().signal,
+    ).openComposer(investor),
+    (error: unknown) => error === checkpoint,
+  );
+});
+
+test('filling checks only the selected recipient and writes text without reading the draft', async () => {
+  const fills: string[] = [];
+  let selected = true;
+  let url = `https://www.linkedin.com/in/${investor.slug}/`;
+  const locator = {
+    count: async () => 1,
+    innerText: async () => 'Page',
+    allTextContents: async () => [],
+    isEnabled: async () => true,
+    waitFor: async () => {},
+    getAttribute: async () => '/messaging/thread/example/',
+    first: () => locator,
+    getByRole: () => locator,
+    or: () => locator,
+    and: () => locator,
+    filter: () => locator,
+  };
+  const frame = {
+    url: () => url,
+    parentFrame: () => null,
+    isDetached: () => false,
+    evaluate: async () => (selected ? { kind: 'chat' } : false),
+    page: () => page,
+    locator: () => ({
+      fill: async (text: string) => {
+        fills.push(text);
+      },
+      evaluate: async () => {
+        throw new Error('Must not read or validate draft text');
+      },
+    }),
+  };
+  const page = {
+    on: () => {},
+    removeListener: () => {},
+    bringToFront: async () => {},
+    goto: async (next: string) => {
+      url = next;
+      return { status: () => 200 };
+    },
+    waitForLoadState: async () => {},
+    url: () => url,
+    isClosed: () => false,
+    locator: () => locator,
+    frames: () => [frame],
+    waitForFunction: async () => ({
+      jsonValue: async () => ({ kind: 'profile', name: investor.name }),
+      dispose: async () => {},
+    }),
+  };
+  const context = { newPage: async () => page } as unknown as BrowserContext;
+  const composer = await new LinkedInMessengerBrowser(
+    context,
+    new AbortController().signal,
+  ).openComposer(investor);
+  await composer.fill({ body: 'Saved funding pitch' });
+  assert.deepEqual(fills, ['Saved funding pitch']);
+  selected = false;
+  await assert.rejects(
+    composer.fill({ body: 'Another pitch' }),
+    /selected message recipient changed/,
+  );
+  assert.deepEqual(fills, ['Saved funding pitch']);
 });

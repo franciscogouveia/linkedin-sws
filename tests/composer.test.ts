@@ -11,15 +11,24 @@ function fixture(
   kind: 'chat' | 'inmail',
   recipient = investor.slug,
   existing = '',
+  existingSubject = '',
 ) {
   return `${header}<script>
     window.sent = 0;
     document.querySelector('#message').onclick = () => {
       const composer = document.createElement('div');
       composer.setAttribute('role', 'dialog');
-      composer.innerHTML = '<h2><a href="/in/${recipient}/">Alex Example</a></h2>${kind === 'inmail' ? '<input aria-label="Subject" placeholder="Subject">' : ''}<div role="textbox" contenteditable="true">${existing}</div><button id="send">Send</button>';
+      composer.innerHTML = '<h2><a href="/in/${recipient}/">Alex Example</a></h2>${kind === 'inmail' ? `<input aria-label="Subject" placeholder="Subject" value="${existingSubject}">` : ''}<div role="textbox" contenteditable="true">${existing}</div><button id="send">Send</button>';
       document.body.append(composer);
-      composer.querySelector('#send').onclick = () => window.sent++;
+      composer.querySelector('#send').onclick = () => {
+        window.sent++;
+        const editor = composer.querySelector('[contenteditable]');
+        const message = document.createElement('p');
+        message.className = 'msg-s-event-listitem__body';
+        message.textContent = editor.innerText;
+        composer.append(message);
+        editor.textContent = '';
+      };
       composer.onkeydown = (event) => { if (event.key === 'Enter') window.sent++; };
     };
   </script>`;
@@ -65,11 +74,134 @@ test(
         await context.close();
       });
     }
+    for (const kind of ['chat', 'inmail'] as const) {
+      await t.test(
+        `live send ${kind} clicks exactly once after verification`,
+        async () => {
+          const context = await browser.newContext();
+          context.setDefaultTimeout(500);
+          await context.route('**/*', (route) =>
+            route.fulfill({ contentType: 'text/html', body: fixture(kind) }),
+          );
+          const composer = await new LinkedInMessengerBrowser(
+            context,
+            new AbortController().signal,
+            undefined,
+            500,
+          ).openComposer(investor);
+          await composer.fill({
+            body: 'Hello Alex, could we discuss funding?',
+            ...(kind === 'inmail' ? { subject: 'Funding Acme' } : {}),
+          });
+          let recorded = false;
+          await composer.send!(() => {
+            recorded = true;
+          });
+          assert.equal(recorded, true);
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(() => (window as unknown as { sent: number }).sent),
+            1,
+          );
+          await assert.rejects(
+            composer.send!(() => {
+              throw new Error('Must not record twice');
+            }),
+            /No unsent draft/,
+          );
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(() => (window as unknown as { sent: number }).sent),
+            1,
+          );
+          await context.close();
+        },
+      );
+    }
+    await t.test(
+      'live send validates only recipient identity before clicking',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        await context.route('**/*', (route) =>
+          route.fulfill({ contentType: 'text/html', body: fixture('chat') }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        await composer.fill({ body: 'Funding Acme' });
+        await context
+          .pages()[0]!
+          .locator('[contenteditable]')
+          .fill('Edited pitch');
+        await context
+          .pages()[0]!
+          .evaluate(() =>
+            document
+              .querySelector('[role=dialog]')!
+              .insertAdjacentHTML('beforeend', '<button>Send</button>'),
+          );
+        await composer.send!(() => {});
+        assert.equal(
+          await context
+            .pages()[0]!
+            .evaluate(() => (window as unknown as { sent: number }).sent),
+          1,
+        );
+        await context.close();
+      },
+    );
+    await t.test(
+      'message center chat matches an ordinary recipient label outside history',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        const profileHtml = header.replace(
+          '<button id="message">Message</button>',
+          '<a id="message" href="/messaging/thread/example/">Message</a>',
+        );
+        const chatHtml = `<main><aside><h2>Wrong Recipient</h2></aside><div class="custom-conversation-pane"><div class="custom-conversation-title"><span>${investor.name}<span class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">View profile information</span></span><button>InMail</button></div><div class="msg-thread"><a href="/in/unrelated-person/">Another profile</a><div class="msg-s-message-list"><p>Previous InMail</p></div><div contenteditable="true" role="textbox" aria-label="Write a message"></div><button id="send">Send</button></div></div></main><script>window.sent = 0; document.querySelector('#send').onclick = () => window.sent++;</script>`;
+        await context.route('**/*', (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: new URL(route.request().url()).pathname.startsWith(
+              '/messaging/',
+            )
+              ? chatHtml
+              : profileHtml,
+          }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        assert.equal(composer.kind, 'chat');
+        await composer.fill({ body: 'Funding Acme' });
+        assert.equal(
+          await context.pages()[0]!.locator('[contenteditable]').innerText(),
+          'Funding Acme',
+        );
+        assert.equal(
+          await context
+            .pages()[0]!
+            .evaluate(() => (window as unknown as { sent: number }).sent),
+          0,
+        );
+        await context.close();
+      },
+    );
     for (const layout of ['link', 'frame', 'popup'] as const) {
       await t.test(`messaging in ${layout}`, async () => {
         const context = await browser.newContext();
         context.setDefaultTimeout(1_000);
-        const composerHtml = `<main><div class="msg-thread"><h2><a href="/in/${investor.slug}/">${investor.name}</a></h2><textarea aria-label="Write a message"></textarea><button id="send">Send</button></div></main><script>window.sent = 0; document.querySelector('#send').onclick = () => window.sent++;</script>`;
+        const composerHtml = `<main><div class="msg-thread"><h2><a href="/in/${investor.slug}/">${investor.name}</a></h2><textarea aria-label="Write a message"></textarea><button id="send">Send</button></div></div></main><script>window.sent = 0; document.querySelector('#send').onclick = () => window.sent++;</script>`;
         const profileHtml =
           layout === 'link'
             ? header.replace(
@@ -160,31 +292,106 @@ test(
         await context.close();
       },
     );
-    await t.test('nonempty draft is untouched', async () => {
-      const context = await browser.newContext();
-      context.setDefaultTimeout(500);
-      await context.route('**/*', (route) =>
-        route.fulfill({
-          contentType: 'text/html',
-          body: fixture('chat', investor.slug, 'Existing draft'),
-        }),
+    for (const [kind, existingBody, existingSubject] of [
+      ['chat', 'Funding Acme', ''],
+      ['inmail', 'Funding Acme', 'Funding round'],
+      ['inmail', 'Funding Acme', ''],
+      ['inmail', '', 'Funding round'],
+    ] as const) {
+      await t.test(
+        `fill ${kind} fields: body=${!!existingBody}, subject=${!!existingSubject}`,
+        async () => {
+          const context = await browser.newContext();
+          context.setDefaultTimeout(500);
+          await context.route('**/*', (route) =>
+            route.fulfill({
+              contentType: 'text/html',
+              body: fixture(kind, investor.slug, existingBody, existingSubject),
+            }),
+          );
+          const composer = await new LinkedInMessengerBrowser(
+            context,
+            new AbortController().signal,
+            undefined,
+            500,
+          ).openComposer(investor);
+          await composer.fill({
+            body: 'Funding Acme',
+            ...(kind === 'inmail' ? { subject: 'Funding round' } : {}),
+          });
+          assert.equal(
+            await context.pages()[0]!.locator('[contenteditable]').innerText(),
+            'Funding Acme',
+          );
+          if (kind === 'inmail')
+            assert.equal(
+              await context.pages()[0]!.locator('input').inputValue(),
+              'Funding round',
+            );
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(() => (window as unknown as { sent: number }).sent),
+            0,
+          );
+          await context.close();
+        },
       );
-      const composer = await new LinkedInMessengerBrowser(
-        context,
-        new AbortController().signal,
-        undefined,
-        500,
-      ).openComposer(investor);
-      await assert.rejects(
-        composer.fill({ body: 'Replacement' }),
-        /existing nonempty draft/i,
-      );
-      assert.equal(
-        await context.pages()[0]!.locator('[contenteditable]').innerText(),
-        'Existing draft',
-      );
-      await context.close();
-    });
+    }
+    await t.test(
+      'saved text fills the selected recipient fields despite an existing subject',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        await context.route('**/*', (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: fixture('inmail', investor.slug, '', 'Other funding'),
+          }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        await composer.fill({ body: 'Funding Acme', subject: 'Funding round' });
+        assert.equal(
+          await context.pages()[0]!.locator('[contenteditable]').innerText(),
+          'Funding Acme',
+        );
+        assert.equal(
+          await context.pages()[0]!.locator('input').inputValue(),
+          'Funding round',
+        );
+        await context.close();
+      },
+    );
+    await t.test(
+      'saved message replaces an existing draft for the verified recipient',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        await context.route('**/*', (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: fixture('chat', investor.slug, 'Existing draft'),
+          }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        await composer.fill({ body: 'Replacement' });
+        assert.equal(
+          await context.pages()[0]!.locator('[contenteditable]').innerText(),
+          'Replacement',
+        );
+        await context.close();
+      },
+    );
     await t.test('wrong recipient leaves text untouched', async () => {
       const context = await browser.newContext();
       context.setDefaultTimeout(100);
@@ -210,7 +417,7 @@ test(
       await context.close();
     });
     await t.test(
-      'explicit upgrade fails and closes the unavailable draft tab',
+      'an unavailable editor fails normally without checking upgrade text',
       async () => {
         const context = await browser.newContext();
         context.setDefaultTimeout(500);
@@ -227,9 +434,9 @@ test(
             undefined,
             500,
           ).openComposer(investor),
-          /requires an upgrade/,
+          /no recognized recipient editor/,
         );
-        assert.equal(context.pages().length, 0);
+        assert.equal(context.pages().length, 1);
         await context.close();
       },
     );

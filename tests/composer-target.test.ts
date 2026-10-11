@@ -104,7 +104,7 @@ test('composer wait can find a recipient editor in a frame or recipient popup', 
   );
 });
 
-test('multiple composer targets fail rather than choosing one', async () => {
+test('multiple verified recipient composers use the first available target', async () => {
   const first = frameFixture(
     'https://www.linkedin.com/messaging/',
     null,
@@ -117,15 +117,13 @@ test('multiple composer targets fail rather than choosing one', async () => {
     true,
     { kind: 'chat' },
   );
-  await assert.rejects(
-    waitForComposer(
-      () => [pageFixture([first.frame, second.frame])],
-      input,
-      new AbortController().signal,
-      100,
-    ),
-    /Multiple recipient message composers/,
+  const result = await waitForComposer(
+    () => [pageFixture([first.frame, second.frame])],
+    input,
+    new AbortController().signal,
+    100,
   );
+  assert.equal(result.frame, first.frame);
 });
 
 test('composer wait is bounded and responds to interruption', async () => {

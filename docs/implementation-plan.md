@@ -1,6 +1,32 @@
 # Implementation Plan
 
-Current PoC supports `dryrun-terminal` and `dryrun-browser` (separate recipient tabs, verified draft text, no sending). Both complete with queue status `dryrun`; reset tooling returns these rows to `new`. The live-send sections below describe future work.
+## Current Three-Stage Contract
+
+The current implementation separates `dev:search`, `dev:write`, and `dev:send`.
+Search performs investor validation and saves accepted and failed profiles. Write
+reopens accepted profiles and atomically saves a subject and body while marking
+the profile `written`. Send consumes persisted text without an LLM or pitch file.
+`dev` runs all three; compiled equivalents use `start:search`, `start:write`, and
+`start:send`.
+
+SQLite now contains `profiles` (`new`, `working`, `written`, `failed`) and
+`messaging` (`new`, `sent`, `failed`, `dryrun`), with one message per profile.
+No legacy migration is provided; the user must select a fresh database.
+Generation and preparation errors skip the row for this invocation and retry on
+a later run. Validation and submission failures remain failed. Interrupted writes
+resume `working`; an attempt marker committed before Send prevents duplicate
+submission after a crash. Account checkpoints and database errors stop processing.
+
+`queue:reset-dryruns` requeues saved messages without regeneration.
+`queue:clear-messages` deletes messages and resets written profiles;
+`queue:clear-profiles` clears both tables. Browser modes verify the selected recipient and fill the saved text directly,
+replacing existing draft contents. They wait for browser closure after the batch.
+See [the development guide](development.md) for the current contract and checks.
+
+## Historical Product Plan
+
+The remaining sections record the original single-queue proposal and decisions at
+that time. They are historical context; the contract above supersedes them.
 
 ## Application Contract
 

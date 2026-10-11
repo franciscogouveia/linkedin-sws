@@ -5,89 +5,126 @@ import { openQueue } from '../../infrastructure/storage/queue.ts';
 import { openLinkedIn } from '../../infrastructure/linkedin/browser.ts';
 import { LlmWriter } from '../../writing/llm.ts';
 import { OpenAITextClient } from '../../infrastructure/llm/client.ts';
-import { runDryRun } from '../workflow.ts';
 import { runSearch } from '../../search/workflow.ts';
-import { runMessages } from '../../writing/workflow.ts';
+import { runWrite } from '../../writing/workflow.ts';
+import { runSend } from '../../communication/workflow.ts';
 import { terminalText } from '../../communication/terminal.ts';
 
-async function main(stage: 'search' | 'message' | 'all'): Promise<void> {
-  if (process.argv.length > 2) {
+async function main(stage: 'search' | 'write' | 'send' | 'all'): Promise<void> {
+  if (process.argv.length > 2)
     throw new ApplicationError(
       'This CLI takes no arguments. Configure it in config.yaml.',
     );
-  }
   const { config, pitch } =
-    stage === 'search'
-      ? { config: await loadConfiguration(), pitch: '' }
-      : await loadStartup();
+    stage === 'write' || stage === 'all'
+      ? await loadStartup()
+      : { config: await loadConfiguration(), pitch: '' };
   const controller = new AbortController();
   const interrupt = () =>
     controller.abort(
-      new ApplicationError('Run interrupted. Queue progress is preserved.'),
+      new ApplicationError('Run interrupted. Database progress is preserved.'),
     );
   process.once('SIGINT', interrupt);
   process.once('SIGTERM', interrupt);
-  const log = (text: string) => process.stderr.write(`${terminalText(text)}\n`);
+  const log = (text: string) => {
+    process.stderr.write(`${terminalText(text)}\n`);
+  };
   let storage: Awaited<ReturnType<typeof openQueue>> | undefined;
   let browser: Awaited<ReturnType<typeof openLinkedIn>> | undefined;
+  let readingProfiles = false;
+  const output = (text: string) =>
+    new Promise<void>((resolve, reject) =>
+      process.stdout.write(text, (error) =>
+        error ? reject(error) : resolve(),
+      ),
+    );
   try {
     storage = await openQueue(config.queue_path);
     controller.signal.throwIfAborted();
-    if (stage === 'message') {
-      const counts = storage.queue.counts();
+    if (stage === 'write') {
+      const counts = storage.profiles.counts();
       if (!counts.new && !counts.working) {
-        log(
-          'No pending queue rows. Run npm run dev:search to find profiles, or npm run queue:reset-dryruns to regenerate completed dry runs.',
-        );
+        log('No profiles pending writing. Run npm run dev:search first.');
         return;
       }
     }
-    log(
-      stage === 'search'
-        ? 'Starting LinkedIn search. Results will be added to the queue.'
-        : config.mode === 'dryrun-terminal'
-          ? 'Starting dry-run prototype. Generated messages will be printed to the terminal.'
-          : 'Starting browser dry run. Drafts will be prepared without sending.',
-    );
-    browser = await openLinkedIn(config.linkedin, controller.signal, log);
-    if (stage === 'search') {
-      await runSearch({
-        config,
-        queue: storage.queue,
-        linkedin: browser.reader,
-        signal: controller.signal,
-        log,
-      });
+    if (stage === 'send' && !storage.messages.counts().new) {
       log(
-        'Search finished. Run npm run dev:message to process queued profiles.',
+        'No new messages to deliver. Run npm run dev:write or npm run queue:reset-dryruns.',
       );
       return;
     }
-    const writer = new LlmWriter(
-      new OpenAITextClient(config.llm, controller.signal),
-      config.llm.max_message_characters,
+    log(
+      `Starting ${stage === 'all' ? 'search → write → send' : stage} (${config.mode}).`,
     );
-    const work = () =>
-      (stage === 'message' ? runMessages : runDryRun)({
+    if (stage === 'send' && config.mode === 'dryrun-terminal') {
+      await runSend({
         config,
-        pitch,
-        queue: storage!.queue,
-        linkedin: browser!.reader,
-        messenger: browser!.messenger,
-        writer,
-        signal: controller.signal,
-        output: (text) =>
-          new Promise<void>((resolve, reject) => {
-            process.stdout.write(text, (error) =>
-              error ? reject(error) : resolve(),
-            );
-          }),
+        messages: storage.messages,
+        output,
         log,
+        signal: controller.signal,
       });
-    if (config.mode === 'dryrun-browser')
-      await withBrowserReview(browser, controller, work, log);
-    else await work();
+      return;
+    }
+    browser = await openLinkedIn(config.linkedin, controller.signal, log);
+    readingProfiles = stage !== 'send';
+    void browser.closed.then(() => {
+      if (readingProfiles && !controller.signal.aborted)
+        controller.abort(
+          new ApplicationError(
+            'Browser closed during profile processing. Database progress is preserved.',
+          ),
+        );
+    });
+    // Search/write need the LLM. Delivery uses only persisted text.
+    if (stage !== 'send') {
+      const writer = new LlmWriter(
+        new OpenAITextClient(config.llm, controller.signal),
+        config.llm.max_message_characters,
+      );
+      if (stage === 'search' || stage === 'all')
+        await runSearch({
+          config,
+          profiles: storage.profiles,
+          linkedin: browser.reader,
+          writer,
+          log,
+          signal: controller.signal,
+        });
+      if (stage === 'write' || stage === 'all')
+        await runWrite({
+          config,
+          pitch,
+          profiles: storage.profiles,
+          messages: storage.messages,
+          linkedin: browser.reader,
+          writer,
+          log,
+          signal: controller.signal,
+        });
+    }
+    readingProfiles = false;
+    controller.signal.throwIfAborted();
+    if (stage === 'send' || stage === 'all') {
+      if (!storage.messages.counts().new) {
+        log('No new messages to deliver.');
+        return;
+      }
+      const work = () =>
+        runSend({
+          config,
+          messages: storage!.messages,
+          messenger: browser!.messenger,
+          output,
+          log,
+          signal: controller.signal,
+        });
+      if (config.mode === 'dryrun-terminal') await work();
+      else await withBrowserReview(browser, controller, work, log);
+    }
   } finally {
+    readingProfiles = false;
     try {
       await browser?.close();
     } finally {
@@ -98,17 +135,15 @@ async function main(stage: 'search' | 'message' | 'all'): Promise<void> {
   }
 }
 
-export function startCli(stage: 'search' | 'message' | 'all'): void {
+export function startCli(stage: 'search' | 'write' | 'send' | 'all'): void {
   process.stdout.on('error', () => {
-    // A closed pipe must not be mistaken for successful dry-run delivery.
     process.exitCode = 1;
   });
-
   main(stage).catch((error: unknown) => {
     const message =
       error instanceof ApplicationError
         ? error.message
-        : 'Run stopped unexpectedly. Queue progress is preserved; check local files and service availability.';
+        : 'Run stopped unexpectedly. Database progress is preserved; check local files and service availability.';
     process.stderr.write(`${terminalText(message)}\n`);
     process.exitCode = 1;
   });

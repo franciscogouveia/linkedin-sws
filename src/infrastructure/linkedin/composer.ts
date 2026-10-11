@@ -1,10 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { BrowserContext, Locator, Page } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 import {
   ApplicationError,
-  MessagingUnavailableError,
+  LinkedInSessionError,
+  DraftVerificationError,
+  SendOutcomeUnknownError,
 } from '../../shared/errors.ts';
 import type {
   Investor,
@@ -17,16 +19,8 @@ import { inspectProfilePage } from './profile-page.ts';
 import { inspectComposer, composerLayoutReport } from './composer-page.ts';
 import { waitForComposer, visibleComposerFrames } from './composer-target.ts';
 import { composerFailure } from './composer-errors.ts';
-import { verifyDraft } from './draft-verification.ts';
-import { hasMessagePlaceholders } from '../../writing/llm.ts';
-
-async function fieldText(field: Locator): Promise<string> {
-  return field.evaluate((node) =>
-    node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement
-      ? node.value
-      : (node as HTMLElement).innerText,
-  );
-}
+import { inspectSendState } from './send-page.ts';
+import { confirmSend } from './send-confirmation.ts';
 
 export class LinkedInMessengerBrowser implements LinkedInMessenger {
   private readonly context: BrowserContext;
@@ -65,7 +59,7 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       await assertLinkedInPage(page);
       if (response && response.status() >= 400)
         throw new ApplicationError(
-          `LinkedIn draft profile returned HTTP ${response.status()}. Queue row remains working.`,
+          `LinkedIn draft profile returned HTTP ${response.status()}.`,
         );
       stage = 'waiting for recipient profile';
       const profile = await page.waitForFunction(inspectProfilePage, {
@@ -76,12 +70,10 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         if (
           !state ||
           state.kind !== 'profile' ||
-          profileSlug(page.url()) !== recipient.slug ||
-          state.name.replace(/\s+/g, ' ').trim().toLowerCase() !==
-            recipient.name.replace(/\s+/g, ' ').trim().toLowerCase()
+          profileSlug(page.url()) !== recipient.slug
         )
           throw new ApplicationError(
-            'Cannot verify the draft recipient profile. Queue row remains working.',
+            'Cannot verify the draft recipient profile.',
           );
       } finally {
         await profile.dispose();
@@ -106,82 +98,87 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       this.signal.throwIfAborted();
       await assertLinkedInPage(messagePage);
       if (!state || typeof state !== 'object')
-        throw new ApplicationError(
-          'Cannot verify the messaging composer. Queue row remains working.',
-        );
-      if (state.kind === 'unavailable')
-        throw new MessagingUnavailableError(state.reason);
+        throw new ApplicationError('Cannot verify the messaging composer.');
       const kind = state.kind;
       const body = target.locator(`[data-sws-body="${token}"]`);
+      let prepared: MessageDraft | undefined;
+      let sendAttempted = false;
       const subject = target.locator(`[data-sws-subject="${token}"]`);
       return {
         kind,
         fill: async (draft: MessageDraft) => {
+          prepared = undefined;
           this.signal.throwIfAborted();
-          if (
-            !draft.body.trim() ||
-            hasMessagePlaceholders(draft.body) ||
-            (kind === 'inmail' &&
-              (!draft.subject?.trim() ||
-                draft.subject.length > 80 ||
-                /[\r\n]/.test(draft.subject) ||
-                hasMessagePlaceholders(draft.subject)))
-          ) {
-            throw new ApplicationError(
-              'Draft text or InMail subject is invalid. Queue row remains working.',
-            );
-          }
           await assertLinkedInPage(messagePage);
-          const current = await target.evaluate(inspectComposer, input);
-          if (!current || current.kind !== kind)
+          if (!(await target.evaluate(inspectComposer, input)))
             throw new ApplicationError(
-              'Draft recipient or composer changed. Queue row remains working.',
+              'The selected message recipient changed.',
             );
-          if (
-            (await fieldText(body)).trim() ||
-            (kind === 'inmail' && (await fieldText(subject)).trim())
-          ) {
-            throw new ApplicationError(
-              'An existing nonempty draft was preserved. Review it in the browser; queue row remains working.',
-            );
-          }
-          if (kind === 'inmail') {
-            await subject.fill(draft.subject!);
+          if (kind === 'inmail' && draft.subject !== undefined) {
+            await subject.fill(draft.subject);
             this.signal.throwIfAborted();
           }
-          // fill changes field text only. Never submit, press Enter, or click Send.
           await body.fill(draft.body);
           this.signal.throwIfAborted();
+          prepared = { ...draft };
+        },
+        send: async (beforeClick: () => void) => {
+          this.signal.throwIfAborted();
+          if (!prepared || sendAttempted)
+            throw new DraftVerificationError(
+              'No unsent draft is available for sending.',
+            );
           await assertLinkedInPage(messagePage);
-          await verifyDraft(
-            draft,
-            async () => {
-              const verified = await target.evaluate(inspectComposer, input);
-              if (!verified || verified.kind !== kind)
-                return { recipientVerified: false };
-              return {
-                recipientVerified: true,
-                body: await fieldText(body),
-                ...(kind === 'inmail'
-                  ? { subject: await fieldText(subject) }
-                  : {}),
-              };
-            },
-            this.signal,
-            Math.min(this.timeout, 2_000),
-          );
+          if (!(await target.evaluate(inspectComposer, input)))
+            throw new ApplicationError(
+              'The selected message recipient changed.',
+            );
+          const root = target.locator(`[data-sws-composer="${token}"]`);
+          const send = root
+            .getByRole('button', {
+              name: /^(?:send|send message|send inmail)$/i,
+            })
+            .filter({ visible: true })
+            .first();
+          await send.waitFor({ state: 'visible' });
+          const before = await target.evaluate(inspectSendState, {
+            token,
+          });
+          this.signal.throwIfAborted();
+          // SQLite commits the uncertainty marker before this irreversible click.
+          beforeClick();
+          sendAttempted = true;
+          try {
+            await send.click();
+            await confirmSend(
+              before,
+              async () => {
+                await assertLinkedInPage(messagePage);
+                // Refresh the recipient-owned root if InMail became a chat thread.
+                const current = await target.evaluate(inspectComposer, input);
+                const snapshot = await target.evaluate(inspectSendState, {
+                  token,
+                });
+                return current
+                  ? snapshot
+                  : { ...snapshot, messageCount: 0, cleared: false };
+              },
+              this.signal,
+              this.timeout,
+            );
+            prepared = undefined;
+          } catch (error) {
+            this.signal.throwIfAborted();
+            if (error instanceof ApplicationError) throw error;
+            throw new SendOutcomeUnknownError(
+              'Send was attempted but its outcome could not be verified. Check the conversation manually.',
+            );
+          }
         },
       };
     } catch (error) {
       this.signal.throwIfAborted();
-      if (error instanceof MessagingUnavailableError) {
-        await Promise.all(
-          [page, ...popups]
-            .filter((tab) => !tab.isClosed())
-            .map((tab) => tab.close()),
-        );
-        throw error;
-      }
+      if (error instanceof LinkedInSessionError) throw error;
       if (!page.isClosed()) await assertLinkedInPage(page);
       const diagnostic = await this.layoutDiagnostic(
         page,
@@ -290,7 +287,7 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
           });
           if (response && response.status() >= 400)
             throw new ApplicationError(
-              `LinkedIn messaging returned HTTP ${response.status()}. Queue row remains working.`,
+              `LinkedIn messaging returned HTTP ${response.status()}.`,
             );
           recordAction('profile LinkedIn messaging link followed');
           return;
@@ -322,15 +319,8 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         return;
       }
     }
-    const notice = await page.evaluate(inspectComposer, {
-      name: '',
-      slug: '',
-      token: '',
-    });
-    if (notice && notice.kind === 'unavailable')
-      throw new MessagingUnavailableError(notice.reason);
     throw new ApplicationError(
-      'No unambiguous profile Message action was found. Review the browser; queue row remains working.',
+      'No profile Message action was found. Review the browser.',
     );
   }
 }

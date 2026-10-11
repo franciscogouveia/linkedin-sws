@@ -16,27 +16,65 @@ export function inspectComposer(input: {
   };
   const normalize = (text: string) =>
     text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const matchesName = (node: Element) => {
+    const expected = normalize(input.name);
+    const labelMatches = (text: string) => {
+      const label = normalize(text.replace(/[\u200b-\u200f\ufeff]/g, ''));
+      if (label === expected) return true;
+      // Only known UI annotations may follow an exact full name. Never accept a
+      // partial name (for example Alex Exampleton) or arbitrary extra name parts.
+      return (
+        label.startsWith(expected) &&
+        /^(?:\s*[•·,|–—-]?\s*(?:1st|2nd|3rd\+?|(?:1st|2nd|3rd\+?) degree(?: connection)?|premium|verified|status is (?:online|offline|reachable)|online|offline|active now))+[.!]?$/i.test(
+          label.slice(expected.length),
+        )
+      );
+    };
+    const rendered = (node as HTMLElement).innerText ?? node.textContent ?? '';
+    if (
+      labelMatches(rendered) ||
+      labelMatches(node.getAttribute('aria-label') ?? '')
+    )
+      return true;
+    // Accessibility/status spans can be concatenated into textContent even when
+    // the visible title consists solely of the recipient's name.
+    if (node.cloneNode) {
+      const title = node.cloneNode(true) as Element;
+      for (const extra of title.querySelectorAll(
+        '[aria-hidden="true"], [hidden], .visually-hidden, .sr-only',
+      ))
+        extra.remove();
+      if (labelMatches(title.textContent ?? '')) return true;
+    }
+    return false;
+  };
   const roots = [
     ...document.querySelectorAll(
       '[role="dialog"], .msg-overlay-conversation-bubble, .msg-convo-wrapper, .msg-thread',
     ),
   ].filter(visible);
   if (location.pathname.startsWith('/messaging/')) {
-    const main = document.querySelector('main');
-    if (main) roots.push(main);
+    const main = document.querySelector('main, [role="main"]');
+    if (main && visible(main)) roots.push(main);
   }
-  const blocked =
-    /(?:upgrade|premium|purchase|buy).{0,80}(?:inmail|message)|(?:inmail|messag(?:e|ing)).{0,80}(?:upgrade|premium required|not available|unavailable|cannot|can't|not allowed)|out of inmail credits|(?:cannot|can't|unable to|not allowed to) (?:send (?:a )?(?:message|inmail)|message)/i;
-  for (const root of roots) {
-    const text = root.textContent ?? '';
-    if (
-      blocked.test(text) &&
-      !root.querySelector('[contenteditable="true"], textarea')
-    ) {
-      return {
-        kind: 'unavailable' as const,
-        reason: 'LinkedIn messaging unavailable or requires an upgrade/credits',
-      };
+  // In the message center, use the editor's ancestors as candidate panes too.
+  // The recipient title can be outside LinkedIn's named conversation wrapper.
+  if (location.pathname.startsWith('/messaging/')) {
+    for (const editor of [
+      ...document.querySelectorAll('[contenteditable="true"], textarea'),
+    ].filter(visible)) {
+      for (
+        let pane = editor.parentElement;
+        pane && pane !== document.body;
+        pane = pane.parentElement
+      ) {
+        if (!roots.includes(pane)) roots.push(pane);
+        if (
+          pane.tagName.toLowerCase() === 'main' ||
+          pane.getAttribute('role') === 'main'
+        )
+          break;
+      }
     }
   }
   const matches: { root: Element; body: Element; subject?: Element }[] = [];
@@ -45,17 +83,18 @@ export function inspectComposer(input: {
     // recipient. Prefer the conversation header when its profile link exists.
     const outsideMessage = (node: Element) =>
       !node.closest(
-        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav',
+        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, [role="log"], .msg-s-message-list-container, .msg-s-message-list-content, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
       );
     const profileLinks = [...root.querySelectorAll('a[href*="/in/"]')].filter(
       (node) => visible(node) && outsideMessage(node),
     );
-    const headerLinks = profileLinks.filter((node) =>
+    // Only recipient/header links constrain identity. Other profile links in the
+    // pane must not reject an exact active-recipient name match.
+    const links = profileLinks.filter((node) =>
       node.closest(
-        'header, h1, h2, h3, [role="heading"], .msg-overlay-bubble-header, .msg-thread__top-card, .msg-thread__link-to-profile',
+        'header, h1, h2, h3, [role="heading"], .msg-overlay-bubble-header, .msg-thread__top-card, .msg-thread__link-to-profile, .msg-thread__heading, .msg-entity-lockup',
       ),
     );
-    const links = headerLinks.length ? headerLinks : profileLinks;
     const matchingSlug =
       links.length > 0 &&
       links.every((link) => {
@@ -72,16 +111,26 @@ export function inspectComposer(input: {
       });
     const names = [
       ...root.querySelectorAll(
-        'h1, h2, h3, [role="heading"], .msg-overlay-bubble-header__title, .msg-conversation-listitem__participant-names, .msg-thread__link-to-profile, [data-recipient-name]',
+        'h1, h2, h3, [role="heading"], header a, header button, header span, .msg-overlay-bubble-header__title, .msg-thread__link-to-profile, .msg-thread__heading, .msg-thread__topic, .msg-entity-lockup__entity-title, .msg-entity-lockup__entity-title > span, .msg-form__recipient, .msg-connections-typeahead__recipient, [data-recipient-name]',
       ),
     ].filter((node) => visible(node) && outsideMessage(node));
+    // The active pane may render the recipient as an ordinary span/div rather
+    // than a heading. Search its non-history text instead of guessing classes.
+    // Keep the whole message-center fallback restricted to semantic headings;
+    // arbitrary names elsewhere in main cannot identify the active recipient.
+    const isMain =
+      root.tagName?.toLowerCase() === 'main' ||
+      root.getAttribute('role') === 'main';
+    const paneNames = isMain
+      ? []
+      : [...root.querySelectorAll('a, button, span, p, div')].filter(
+          (node) =>
+            visible(node) &&
+            outsideMessage(node) &&
+            (node.textContent ?? '').length <= 200,
+        );
     if (
-      links.length
-        ? !matchingSlug
-        : !names.some(
-            (node) =>
-              normalize(node.textContent ?? '') === normalize(input.name),
-          )
+      links.length ? !matchingSlug : ![...names, ...paneNames].some(matchesName)
     )
       continue;
     const subjects = [
@@ -99,8 +148,9 @@ export function inspectComposer(input: {
           node.getAttribute('aria-label') ?? '',
         ),
     );
-    if (subjects.length > 1 || bodies.length !== 1) continue;
-    if (/\binmail\b/i.test(textOf(root)) && subjects.length !== 1) continue;
+    if (!bodies.length) continue;
+    // A subject field identifies InMail. UI labels and container text are hints,
+    // not extra gates: one recipient-owned editor is enough to prepare a draft.
     matches.push({
       root,
       body: bodies[0]!,
@@ -112,14 +162,24 @@ export function inspectComposer(input: {
     (match, index) =>
       matches.findIndex((other) => other.body === match.body) === index,
   );
-  if (unique.length !== 1) return false;
+  if (!unique.length) return false;
   const match = unique[0]!;
+  // React can replace the editor or move from InMail to a conversation thread.
+  // Remove stale markers so field/button locators keep one recipient-owned target.
+  for (const [attribute, selected] of [
+    ['data-sws-composer', match.root],
+    ['data-sws-body', match.body],
+    ['data-sws-subject', match.subject],
+  ] as const) {
+    for (const node of document.querySelectorAll(`[${attribute}]`)) {
+      if (node.getAttribute(attribute) === input.token && node !== selected)
+        node.removeAttribute(attribute);
+    }
+  }
+  match.root.setAttribute('data-sws-composer', input.token);
   match.body.setAttribute('data-sws-body', input.token);
   match.subject?.setAttribute('data-sws-subject', input.token);
   return { kind: match.subject ? ('inmail' as const) : ('chat' as const) };
-  function textOf(element: Element) {
-    return element.textContent ?? '';
-  }
 }
 
 /** Structure and known UI labels only; never saves profile or message text. */
@@ -152,6 +212,38 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
       .trim();
   const normalize = (text: string) =>
     text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const matchesName = (node: Element) => {
+    const expected = normalize(input.name);
+    const labelMatches = (text: string) => {
+      const label = normalize(text.replace(/[\u200b-\u200f\ufeff]/g, ''));
+      if (label === expected) return true;
+      // Only known UI annotations may follow an exact full name. Never accept a
+      // partial name (for example Alex Exampleton) or arbitrary extra name parts.
+      return (
+        label.startsWith(expected) &&
+        /^(?:\s*[•·,|–—-]?\s*(?:1st|2nd|3rd\+?|(?:1st|2nd|3rd\+?) degree(?: connection)?|premium|verified|status is (?:online|offline|reachable)|online|offline|active now))+[.!]?$/i.test(
+          label.slice(expected.length),
+        )
+      );
+    };
+    const rendered = (node as HTMLElement).innerText ?? node.textContent ?? '';
+    if (
+      labelMatches(rendered) ||
+      labelMatches(node.getAttribute('aria-label') ?? '')
+    )
+      return true;
+    // Accessibility/status spans can be concatenated into textContent even when
+    // the visible title consists solely of the recipient's name.
+    if (node.cloneNode) {
+      const title = node.cloneNode(true) as Element;
+      for (const extra of title.querySelectorAll(
+        '[aria-hidden="true"], [hidden], .visually-hidden, .sr-only',
+      ))
+        extra.remove();
+      if (labelMatches(title.textContent ?? '')) return true;
+    }
+    return false;
+  };
   return {
     pageKind: location.pathname.startsWith('/in/')
       ? 'profile'
@@ -205,6 +297,75 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
               })()
             : null,
       })),
+    // Report all candidate containers, including the full message center.
+    composerCandidates: [
+      ...document.querySelectorAll(
+        '[role="dialog"], .msg-overlay-conversation-bubble, .msg-convo-wrapper, .msg-thread, main, [role="main"]',
+      ),
+    ]
+      .filter(visible)
+      .map((root) => {
+        const outsideMessage = (node: Element) =>
+          !node.closest(
+            '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, [role="log"], .msg-s-message-list-container, .msg-s-message-list-content, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
+          );
+        const names = [
+          ...root.querySelectorAll(
+            'h1, h2, h3, [role="heading"], header a, header button, header span, .msg-overlay-bubble-header__title, .msg-thread__link-to-profile, .msg-thread__heading, .msg-thread__topic, .msg-entity-lockup__entity-title, .msg-entity-lockup__entity-title > span, .msg-form__recipient, .msg-connections-typeahead__recipient, [data-recipient-name]',
+          ),
+        ].filter((node) => visible(node) && outsideMessage(node));
+        const links = [...root.querySelectorAll('a[href*="/in/"]')].filter(
+          (node) => visible(node) && outsideMessage(node),
+        );
+        const fields = [
+          ...root.querySelectorAll('[contenteditable="true"], textarea'),
+        ].filter(visible);
+        const isMain =
+          root.tagName?.toLowerCase() === 'main' ||
+          root.getAttribute('role') === 'main';
+        const paneNames = isMain
+          ? []
+          : [...root.querySelectorAll('a, button, span, p, div')].filter(
+              (node) =>
+                visible(node) &&
+                outsideMessage(node) &&
+                (node.textContent ?? '').length <= 200,
+            );
+        return {
+          recipientNameCandidates: names.length,
+          paneNameCandidates: paneNames.length,
+          paneNameMatches: paneNames.filter(matchesName).length,
+          recipientNameMatches: names.filter(matchesName).length,
+          recipientProfileLinks: links.length,
+          recipientSlugMatches: links.filter((node) => {
+            try {
+              const url = new URL((node as HTMLAnchorElement).href);
+              return (
+                ['www.linkedin.com', 'linkedin.com'].includes(url.hostname) &&
+                decodeURIComponent(url.pathname).replace(/\/$/, '') ===
+                  `/in/${input.slug}`
+              );
+            } catch {
+              return false;
+            }
+          }).length,
+          editableFields: fields.length,
+          inmailEditorLabels: fields.filter((node) =>
+            /\binmail\b/i.test(
+              [
+                node.getAttribute('aria-label'),
+                node.getAttribute('placeholder'),
+                node.getAttribute('data-placeholder'),
+              ].join(' '),
+            ),
+          ).length,
+          subjectFields: [
+            ...root.querySelectorAll(
+              'input[name*="subject" i], input[placeholder*="subject" i], input[aria-label*="subject" i], textarea[name*="subject" i], textarea[placeholder*="subject" i]',
+            ),
+          ].filter(visible).length,
+        };
+      }),
     composerRecipientLinks: dialogs.filter(visible).filter((root) =>
       [...root.querySelectorAll('a[href*="/in/"]')].some((node) => {
         try {

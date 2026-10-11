@@ -4,11 +4,19 @@ export interface Investor {
   slug: string;
 }
 
-export type QueueStatus = 'new' | 'working' | 'sent' | 'failed' | 'dryrun';
-
-export interface QueueRow extends Investor {
+export type ProfileStatus = 'new' | 'working' | 'written' | 'failed';
+export type MessageStatus = 'new' | 'sent' | 'failed' | 'dryrun';
+export interface ProfileRow extends Investor {
   id: number;
-  status: QueueStatus;
+  status: ProfileStatus;
+  failure: string;
+}
+export interface MessageRow extends Investor {
+  id: number;
+  profile_id: number;
+  subject: string;
+  message: string;
+  status: MessageStatus;
   failure: string;
 }
 
@@ -48,6 +56,8 @@ export interface MessageDraft {
 export interface MessageComposer {
   kind: 'chat' | 'inmail';
   fill(draft: MessageDraft): Promise<void>;
+  /** Persist the attempt immediately before the irreversible click. */
+  send?(beforeClick: () => void): Promise<void>;
 }
 export interface LinkedInMessenger {
   openComposer(recipient: Investor): Promise<MessageComposer>;
@@ -78,11 +88,23 @@ export interface OutreachContext {
   website?: string | undefined;
 }
 
-export interface QueueStore {
-  append(investor: Investor): boolean;
-  next(): QueueRow | undefined;
-  finish(id: number, status: 'failed' | 'dryrun', failure?: string): void;
-  counts(): Record<QueueStatus, number>;
+export interface ProfileStore {
+  has(slug: string): boolean;
+  append(investor: Investor, failure?: string): boolean;
+  next(excluded: number[]): ProfileRow | undefined;
+  retry(id: number): void;
+  counts(): Record<ProfileStatus, number>;
+}
+export interface MessagingStore {
+  save(profileId: number, draft: Required<MessageDraft>): void;
+  next(excluded: number[]): MessageRow | undefined;
+  finish(
+    id: number,
+    status: 'failed' | 'dryrun' | 'sent',
+    failure?: string,
+  ): void;
+  failSend(id: number, reason: string): void;
+  counts(): Record<MessageStatus, number>;
 }
 
 export interface TextRequest {
@@ -96,3 +118,6 @@ export interface TextRequest {
 export interface TextGenerator {
   request(request: TextRequest): Promise<string>;
 }
+
+export const SEND_UNCERTAIN_FAILURE =
+  'send outcome uncertain; verify the LinkedIn conversation manually before retrying';

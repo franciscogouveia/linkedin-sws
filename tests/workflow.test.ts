@@ -1,421 +1,489 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import test from 'node:test';
-import { openQueue } from '../src/infrastructure/storage/queue.ts';
-import { runDryRun } from '../src/app/workflow.ts';
+import { runWorkflow } from '../src/app/workflow.ts';
 import { runSearch } from '../src/search/workflow.ts';
-import { runMessages } from '../src/writing/workflow.ts';
-import type { LinkedInReader, PitchWriter } from '../src/shared/types.ts';
+import { runWrite } from '../src/writing/workflow.ts';
+import { runSend } from '../src/communication/workflow.ts';
+import { openQueue } from '../src/infrastructure/storage/queue.ts';
+import {
+  ApplicationError,
+  DraftVerificationError,
+  LinkedInSessionError,
+  StorageError,
+} from '../src/shared/errors.ts';
+import type {
+  Investor,
+  LinkedInReader,
+  PitchWriter,
+  MessageDraft,
+  MessageComposer,
+} from '../src/shared/types.ts';
+import { SEND_UNCERTAIN_FAILURE } from '../src/shared/types.ts';
 import {
   investor,
   profile,
   temporaryDirectory,
   testConfig,
 } from './helpers.ts';
+import type { TestContext } from 'node:test';
 
-async function setup(t: Parameters<typeof temporaryDirectory>[0]) {
+async function fixture(t: TestContext) {
   const directory = await temporaryDirectory(t);
   const storage = await openQueue(join(directory, 'queue.sqlite'));
   t.after(() => storage.close());
-  const generated: { profile: string; pitch: string }[] = [];
-  const output: string[] = [];
+  const logs: string[] = [];
+  const outputs: string[] = [];
+  const config = { ...testConfig(directory), max_profiles_per_run: 10 };
+  const controller = new AbortController();
   const linkedin: LinkedInReader = {
     search: async (_criteria, onResult) => {
       onResult(investor);
       return 1;
     },
-    readProfile: async () => profile,
+    readProfile: async (slug) => ({ ...profile, slug }),
   };
   const writer: PitchWriter = {
-    writeSubject: async () => 'Funding opportunity',
     classify: async () => ({
       decision: 'investor',
       evidence: investor.role,
-      reason: 'Explicit investor headline.',
+      reason: 'Explicit angel investor',
     }),
-    write: async (inputProfile, pitch) => {
-      generated.push({ profile: inputProfile.slug, pitch });
-      return 'Hello Alex, could we discuss funding our business?';
-    },
+    write: async () => 'Hello Alex, could we discuss funding?',
+    writeSubject: async () => 'Funding Acme',
   };
   const options = {
-    config: testConfig(directory),
-    pitch: 'Our verified business pitch',
-    queue: storage.queue,
+    config,
+    profiles: storage.profiles,
+    messages: storage.messages,
     linkedin,
     writer,
+    pitch: 'Acme builds software.',
+    log: (text: string) => logs.push(text),
     output: async (text: string) => {
-      output.push(text);
+      outputs.push(text);
     },
-    log: (_text: string) => {},
-    signal: new AbortController().signal,
+    signal: controller.signal,
   };
-  return { storage, options, generated, output };
+  function seed(count = 1) {
+    for (let i = 0; i < count; i++)
+      storage.profiles.append({ ...investor, slug: `investor-${i}` });
+  }
+  function seedMessages(count = 1) {
+    seed(count);
+    for (let i = 0; i < count; i++)
+      storage.messages.save(storage.profiles.next([])!.id, {
+        subject: 'Funding Acme',
+        body: 'Hello Alex, could we discuss funding?',
+      });
+  }
+  return { storage, logs, outputs, options, controller, seed, seedMessages };
 }
 
-test('search-only appends and deduplicates profiles without analyzing or generating messages', async (t) => {
-  const { options, storage, output } = await setup(t);
-  const unexpected = async (): Promise<never> => {
-    throw new Error('Search must not process profiles');
+test('full pipeline validates once, saves subject and body, and delivers saved messages', async (t) => {
+  const f = await fixture(t);
+  let classifications = 0;
+  let reads = 0;
+  f.options.linkedin.readProfile = async () => {
+    reads++;
+    return { ...profile };
   };
-  options.linkedin.readProfile = unexpected;
-  options.writer.classify = unexpected;
-  options.writer.write = unexpected;
-  assert.deepEqual(await runSearch(options), { discovered: 1, appended: 1 });
-  assert.deepEqual(await runSearch(options), { discovered: 1, appended: 0 });
-  assert.equal(storage.queue.rows()[0]?.status, 'new');
-  assert.equal(output.length, 0);
-});
-
-test('message-only resumes the persisted queue without searching or adding new rows', async (t) => {
-  const { options, storage, output } = await setup(t);
-  await runSearch(options);
-  const selected = storage.queue.next();
-  assert.equal(selected?.status, 'working');
-  options.linkedin.search = async () => {
-    throw new Error('Message stage must not search');
-  };
-  assert.deepEqual(await runMessages(options), { processed: 1, displayed: 1 });
-  assert.equal(storage.queue.rows().length, 1);
-  assert.equal(storage.queue.rows()[0]?.status, 'dryrun');
-  assert.deepEqual(await runMessages(options), { processed: 0, displayed: 0 });
-  assert.equal(output.length, 1);
-});
-
-test('dry run generates with profile and startup pitch, prints once, and skips completed rows on rerun', async (t) => {
-  const { storage, options, generated, output } = await setup(t);
-  let suppliedName: string | undefined;
-  options.linkedin.readProfile = async (_slug, name) => {
-    suppliedName = name;
-    return profile;
-  };
-  const result = await runDryRun(options);
-  assert.equal(suppliedName, investor.name);
-  assert.equal(result.displayed, 1);
-  assert.deepEqual(generated, [
-    { profile: investor.slug, pitch: options.pitch },
-  ]);
-  assert.match(output[0] ?? '', /Hello Alex/);
-  assert.match(output[0] ?? '', /alex-example/);
-  assert.equal(storage.queue.rows()[0]?.status, 'dryrun');
-  assert.equal((await runDryRun(options)).processed, 0);
-  assert.equal(output.length, 1);
-});
-
-test('missing profiles and negative or uncertain assessments fail without generating messages', async (t) => {
-  for (const decision of ['missing', 'not_investor', 'uncertain'] as const) {
-    await t.test(decision, async (t) => {
-      const { storage, options, generated, output } = await setup(t);
-      if (decision === 'missing')
-        options.linkedin.readProfile = async () => null;
-      else
-        options.writer.classify = async () => ({
-          decision,
-          evidence: '',
-          reason: 'Insufficient evidence.',
-        });
-      await runDryRun(options);
-      const expected =
-        decision === 'missing'
-          ? 'invalid slug, profile not found'
-          : decision === 'not_investor'
-            ? 'not an investor'
-            : 'investor status uncertain';
-      assert.equal(storage.queue.rows()[0]?.status, 'failed');
-      assert.equal(storage.queue.rows()[0]?.failure, expected);
-      assert.equal(generated.length, 0);
-      assert.equal(output.length, 0);
-      assert.equal((await runDryRun(options)).processed, 0);
-    });
-  }
-});
-
-test('browser, LLM, and output failures preserve working rows for a later restart', async (t) => {
-  for (const stage of ['profile', 'classify', 'write', 'output'] as const) {
-    await t.test(stage, async (t) => {
-      const { storage, options } = await setup(t);
-      const fail = async (): Promise<never> => {
-        throw new Error('Required service unavailable');
-      };
-      if (stage === 'profile') options.linkedin.readProfile = fail;
-      if (stage === 'classify') options.writer.classify = fail;
-      if (stage === 'write') options.writer.write = fail;
-      if (stage === 'output') options.output = fail;
-      await assert.rejects(runDryRun(options), /unavailable/);
-      assert.equal(storage.queue.rows()[0]?.status, 'working');
-      assert.equal(storage.queue.rows()[0]?.failure, '');
-    });
-  }
-});
-
-test('search interruption retains already discovered rows without beginning profile processing', async (t) => {
-  const { storage, options } = await setup(t);
-  options.linkedin.search = async (_criteria, onResult) => {
-    onResult(investor);
-    throw new Error('Checkpoint');
-  };
-  await assert.rejects(runDryRun(options), /Checkpoint/);
-  assert.equal(storage.queue.rows()[0]?.status, 'new');
-});
-
-test('dry-run output removes terminal escape sequences from scraped and generated content', async (t) => {
-  const { options, output } = await setup(t);
-  options.writer.write = async () => '\x1b[31mHello\x1b[0m\x00';
-  await runDryRun(options);
-  assert.ok(!output[0]?.includes('\x1b'));
-  assert.ok(!output[0]?.includes('\x00'));
-  assert.match(output[0] ?? '', /Hello/);
-});
-
-test('classification receives the search role and logs the decision reason and extracted data sizes', async (t) => {
-  const { options } = await setup(t);
-  options.linkedin.readProfile = async () => ({
-    ...profile,
-    sections: {
-      header: 'Alex Example\nAngel Investor',
-      about: '',
-      experience: '',
-    },
-  });
-  options.writer.classify = async (candidate) => {
-    assert.equal(candidate.searchRole, investor.role);
+  f.options.writer.classify = async (p) => {
+    classifications++;
+    assert.equal(p.searchRole, investor.role);
     return {
-      decision: 'uncertain',
-      evidence: '',
-      reason: 'Missing current investment evidence.',
+      decision: 'investor',
+      reason: 'Angel Investor',
+      evidence: investor.role,
     };
   };
-  const logs: string[] = [];
-  options.log = (text) => logs.push(text);
-  await runDryRun(options);
-  assert.match(logs.join('\n'), /About 0, Experience 0 characters/);
+  const result = await runWorkflow(f.options);
+  assert.equal(result.search.accepted, 1);
+  assert.equal(result.write.written, 1);
+  assert.equal(result.send.completed, 1);
+  assert.equal(classifications, 1);
+  assert.equal(reads, 2);
+  assert.equal(f.storage.profiles.rows()[0]?.status, 'written');
+  assert.equal(f.storage.messages.rows()[0]?.status, 'dryrun');
+  assert.match(f.outputs[0]!, /Subject: Funding Acme/);
+  assert.match(f.outputs[0]!, /Hello Alex/);
+});
+
+test('search finishes discovery before validation, saves all failures, and skips existing slugs', async (t) => {
+  const f = await fixture(t);
+  const candidates = [
+    'accepted',
+    'rejected',
+    'uncertain',
+    'missing',
+    'broken',
+  ].map((slug) => ({ ...investor, slug }));
+  let discoveryFinished = false;
+  f.options.linkedin.search = async (_criteria, onResult) => {
+    for (const row of candidates) onResult(row);
+    onResult(candidates[0]!);
+    discoveryFinished = true;
+    return 5;
+  };
+  f.options.linkedin.readProfile = async (slug) => {
+    assert.equal(discoveryFinished, true);
+    if (slug === 'missing') return null;
+    if (slug === 'broken') throw new ApplicationError('Network failure');
+    return { ...profile, slug };
+  };
+  f.options.writer.classify = async (p) => ({
+    decision:
+      p.slug === 'accepted'
+        ? 'investor'
+        : p.slug === 'rejected'
+          ? 'not_investor'
+          : 'uncertain',
+    reason: 'classification reason',
+    evidence: '',
+  });
+  assert.deepEqual(await runSearch(f.options), {
+    discovered: 5,
+    accepted: 1,
+    failed: 4,
+    skipped: 0,
+  });
+  assert.equal(f.storage.profiles.counts().failed, 4);
+  assert.equal(
+    f.storage.profiles.rows().find((p) => p.slug === 'missing')?.failure,
+    'invalid slug, profile not found',
+  );
   assert.match(
-    logs.join('\n'),
-    /Investor assessment: uncertain\. Reason: Missing current investment evidence/,
+    f.storage.profiles.rows().find((p) => p.slug === 'rejected')!.failure,
+    /not an investor/,
+  );
+  assert.equal(
+    f.storage.profiles.rows().find((p) => p.slug === 'broken')?.failure,
+    'Network failure',
+  );
+  assert.equal((await runSearch(f.options)).skipped, 5);
+  assert.equal(f.storage.messages.rows().length, 0);
+});
+
+test('write skips generation failures once per invocation and retries them next time', async (t) => {
+  const f = await fixture(t);
+  f.seed(3);
+  let calls = 0;
+  f.options.writer.write = async (p) => {
+    calls++;
+    if (p.slug === 'investor-0') throw new ApplicationError('LLM timed out');
+    return 'Funding pitch';
+  };
+  f.options.writer.classify = async () => {
+    throw new Error('Write must not classify');
+  };
+  assert.deepEqual(await runWrite(f.options), { processed: 3, written: 2 });
+  assert.equal(calls, 3);
+  assert.equal(f.storage.profiles.rows()[0]?.status, 'new');
+  assert.equal(f.storage.messages.rows().length, 2);
+  f.options.writer.write = async () => 'Retried funding pitch';
+  assert.deepEqual(await runWrite(f.options), { processed: 1, written: 1 });
+  assert.equal(f.storage.messages.rows().length, 3);
+});
+
+test('subject generation failure saves no partial message and remains retryable', async (t) => {
+  const f = await fixture(t);
+  f.seed();
+  f.options.writer.writeSubject = async () => {
+    throw new ApplicationError('Subject timed out');
+  };
+  await runWrite(f.options);
+  assert.equal(f.storage.profiles.rows()[0]?.status, 'new');
+  assert.equal(f.storage.messages.rows().length, 0);
+});
+
+test('write interruption leaves working profile resumable; database errors stop processing', async (t) => {
+  const f = await fixture(t);
+  f.seed(2);
+  f.options.writer.write = async () => {
+    f.controller.abort(new ApplicationError('Interrupted'));
+    return 'Body';
+  };
+  await assert.rejects(runWrite(f.options), /Interrupted/);
+  assert.equal(f.storage.profiles.rows()[0]?.status, 'working');
+  assert.equal(f.storage.profiles.rows()[1]?.status, 'new');
+  const nextOptions = {
+    ...f.options,
+    signal: new AbortController().signal,
+    writer: { ...f.options.writer, write: async () => 'Body' },
+    messages: {
+      ...f.options.messages,
+      save: () => {
+        throw new StorageError('Database failed');
+      },
+    },
+  };
+  await assert.rejects(runWrite(nextOptions), /Database failed/);
+  assert.equal(f.storage.profiles.rows()[0]?.status, 'working');
+});
+
+test('write and send independently respect attempt limits and preserve unprocessed rows', async (t) => {
+  const f = await fixture(t);
+  f.seed(3);
+  f.options.config.max_profiles_per_run = 2;
+  assert.equal((await runWrite(f.options)).processed, 2);
+  assert.equal(f.storage.profiles.counts().new, 1);
+  f.options.config.max_profiles_per_run = 1;
+  assert.equal((await runSend(f.options)).processed, 1);
+  assert.equal(f.storage.messages.counts().new, 1);
+});
+
+test('terminal send uses only saved text without browser, profile reader, or LLM', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages(2);
+  const result = await runSend({
+    config: f.options.config,
+    messages: f.storage.messages,
+    log: f.options.log,
+    output: f.options.output,
+    signal: f.options.signal,
+  });
+  assert.equal(result.completed, 2);
+  assert.equal(f.outputs.length, 2);
+  assert.equal(f.storage.profiles.counts().written, 2);
+  assert.equal((await runSend(f.options)).processed, 0);
+  f.storage.repository.resetDryruns();
+  assert.equal((await runSend(f.options)).completed, 2);
+});
+
+for (const mode of ['dryrun-browser', 'live'] as const) {
+  test(`${mode} preparation failure continues and remains new; InMail receives stored subject`, async (t) => {
+    const f = await fixture(t);
+    f.seedMessages(3);
+    const filled: MessageDraft[] = [];
+    const messenger = {
+      openComposer: async (recipient: Investor): Promise<MessageComposer> => ({
+        kind: 'inmail',
+        fill: async (draft) => {
+          if (recipient.slug === 'investor-0')
+            throw new DraftVerificationError('Wrong text');
+          filled.push(draft);
+        },
+        send: async (beforeClick) => {
+          beforeClick();
+        },
+      }),
+    };
+    const result = await runSend({
+      ...f.options,
+      config: { ...f.options.config, mode },
+      messenger,
+    });
+    assert.equal(result.processed, 3);
+    assert.equal(result.completed, 2);
+    assert.equal(result.skipped, 1);
+    assert.equal(f.storage.messages.rows()[0]?.status, 'new');
+    assert.deepEqual(filled[0], {
+      body: 'Hello Alex, could we discuss funding?',
+      subject: 'Funding Acme',
+    });
+    assert.equal(
+      f.storage.messages.rows()[1]?.status,
+      mode === 'live' ? 'sent' : 'dryrun',
+    );
+  });
+}
+
+test('chat omits subject and browser dryrun never submits', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages();
+  await runSend({
+    ...f.options,
+    config: { ...f.options.config, mode: 'dryrun-browser' },
+    messenger: {
+      openComposer: async () => ({
+        kind: 'chat',
+        fill: async (draft) => {
+          assert.equal(draft.subject, undefined);
+        },
+        send: async () => {
+          throw new Error('Must not send');
+        },
+      }),
+    },
+  });
+  assert.equal(f.storage.messages.rows()[0]?.status, 'dryrun');
+});
+
+test('submission failure persists a nonretryable failed row, then processes the next message', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages(2);
+  let clicks = 0;
+  const messenger = {
+    openComposer: async (recipient: Investor): Promise<MessageComposer> => ({
+      kind: 'chat',
+      fill: async () => {},
+      send: async (beforeClick) => {
+        beforeClick();
+        assert.equal(
+          f.storage.messages.rows().find((r) => r.slug === recipient.slug)
+            ?.failure,
+          SEND_UNCERTAIN_FAILURE,
+        );
+        clicks++;
+        if (recipient.slug === 'investor-0')
+          throw new ApplicationError('Confirmation timed out');
+      },
+    }),
+  };
+  assert.equal(
+    (
+      await runSend({
+        ...f.options,
+        config: { ...f.options.config, mode: 'live' },
+        messenger,
+      })
+    ).failed,
+    1,
+  );
+  assert.equal(clicks, 2);
+  assert.equal(f.storage.messages.rows()[0]?.status, 'failed');
+  assert.match(f.storage.messages.rows()[0]!.failure, /Confirmation timed out/);
+  assert.equal(f.storage.messages.rows()[1]?.status, 'sent');
+  assert.equal(
+    (
+      await runSend({
+        ...f.options,
+        config: { ...f.options.config, mode: 'live' },
+        messenger,
+      })
+    ).processed,
+    0,
   );
 });
 
-test('the workflow passes configured outreach facts into message generation', async (t) => {
-  const { options } = await setup(t);
-  options.config.outreach = {
-    founder_name: 'Sam',
-    business_name: 'Acme',
-    funding_stage: 'Pre-seed',
+test('account checkpoints stop search, write, and send rather than skipping the batch', async (t) => {
+  const f = await fixture(t);
+  const failure = new LinkedInSessionError('Account checkpoint');
+  f.options.linkedin.readProfile = async () => {
+    throw failure;
   };
-  let received: unknown;
-  options.writer.write = async (_profile, _pitch, context) => {
-    received = context;
-    return 'Hello Alex, could we discuss funding Acme? Sam';
-  };
-  await runDryRun(options);
-  assert.deepEqual(received, options.config.outreach);
-});
-
-test('a batch processes all five pending profiles and reports queue exhaustion', async (t) => {
-  const { options, storage, output } = await setup(t);
-  options.config.max_profiles_per_run = 10;
-  options.linkedin.search = async (_criteria, onResult) => {
-    for (let i = 0; i < 5; i++)
-      onResult({ ...investor, slug: `investor-${i}` });
-    return 5;
-  };
-  const logs: string[] = [];
-  options.log = (text) => logs.push(text);
-  const result = await runDryRun(options);
-  assert.equal(result.processed, 5);
-  assert.equal(output.length, 5);
-  assert.equal(storage.queue.counts().dryrun, 5);
-  assert.match(logs.join('\n'), /no new or working queue rows remain/);
-});
-
-test('duplicate completed and failed results explain a single-message run without resetting rows', async (t) => {
-  const { options, storage, output } = await setup(t);
-  options.config.max_profiles_per_run = 10;
-  for (let i = 0; i < 4; i++) {
-    storage.queue.append({ ...investor, slug: `old-${i}` });
-    const row = storage.queue.next()!;
-    storage.queue.finish(
-      row.id,
-      i === 0 ? 'failed' : 'dryrun',
-      i === 0 ? 'not an investor' : '',
-    );
-  }
-  options.linkedin.search = async (_criteria, onResult) => {
-    for (let i = 0; i < 4; i++) onResult({ ...investor, slug: `old-${i}` });
-    onResult(investor);
-    return 5;
-  };
-  const logs: string[] = [];
-  options.log = (text) => logs.push(text);
-  const result = await runDryRun(options);
-  assert.equal(result.appended, 1);
-  assert.equal(result.processed, 1);
-  assert.equal(output.length, 1);
-  assert.match(logs.join('\n'), /1 new, 0 working, 3 dryrun, 0 sent, 1 failed/);
-  assert.match(logs.join('\n'), /no new or working queue rows remain/);
-});
-
-test('rejected profiles count toward the limit and the stop summary reports pending rows', async (t) => {
-  const { options, output } = await setup(t);
-  options.config.max_profiles_per_run = 2;
-  options.linkedin.search = async (_criteria, onResult) => {
-    for (let i = 0; i < 5; i++)
-      onResult({ ...investor, slug: `investor-${i}` });
-    return 5;
-  };
-  let classified = 0;
-  options.writer.classify = async () => ({
-    decision: classified++ === 0 ? 'not_investor' : 'investor',
-    evidence: investor.role,
-    reason: 'Test assessment',
+  await assert.rejects(runSearch(f.options), /Account checkpoint/);
+  assert.equal(f.storage.profiles.rows().length, 0);
+  f.seed(2);
+  await assert.rejects(runWrite(f.options), /Account checkpoint/);
+  assert.equal(f.storage.profiles.rows()[0]?.status, 'working');
+  f.storage.messages.save(f.storage.profiles.next([])!.id, {
+    body: 'Pitch',
+    subject: 'Funding',
   });
-  const logs: string[] = [];
-  options.log = (text) => logs.push(text);
-  const result = await runDryRun(options);
-  assert.equal(result.processed, 2);
-  assert.equal(output.length, 1);
-  assert.match(logs.join('\n'), /1 failed this run; 3 pending/);
-  assert.match(logs.join('\n'), /Stopped at max_profiles_per_run \(2\)/);
-});
-
-test('browser mode prepares each recipient and records dryrun only after verified fill', async (t) => {
-  const { options, storage, output } = await setup(t);
-  options.config.mode = 'dryrun-browser';
-  options.config.max_profiles_per_run = 2;
-  storage.queue.append(investor);
-  storage.queue.append({ ...investor, slug: 'second-investor' });
-  let subjects = 0;
-  options.writer.writeSubject = async (_profile, pitch, body, context) => {
-    assert.equal(pitch, options.pitch);
-    assert.match(body, /Hello Alex/);
-    assert.equal(context, options.config.outreach);
-    subjects++;
-    return 'Funding opportunity';
-  };
-  let opened = 0;
-  const messenger = {
-    openComposer: async (recipient: typeof investor) => {
-      const kind = opened++ === 0 ? ('chat' as const) : ('inmail' as const);
-      return {
-        kind,
-        fill: async (draft: { body: string; subject?: string }) => {
-          assert.equal(
-            storage.queue.rows().find((row) => row.slug === recipient.slug)
-              ?.status,
-            'working',
-          );
-          assert.equal(
-            draft.subject,
-            kind === 'inmail' ? 'Funding opportunity' : undefined,
-          );
-          assert.match(draft.body, /Hello Alex/);
-        },
-      };
-    },
-  };
-  assert.deepEqual(await runMessages({ ...options, messenger }), {
-    processed: 2,
-    displayed: 2,
-  });
-  assert.equal(subjects, 1);
-  assert.equal(storage.queue.counts().dryrun, 2);
-  assert.equal(output.length, 0);
-});
-
-test('browser layout and fill errors preserve working; explicit messaging unavailability continues the batch', async (t) => {
-  const { MessagingUnavailableError } = await import('../src/shared/errors.ts');
-  for (const stage of ['open', 'fill', 'unavailable'] as const) {
-    await t.test(stage, async (t) => {
-      const { options, storage } = await setup(t);
-      options.config.mode = 'dryrun-browser';
-      options.config.max_profiles_per_run = 2;
-      storage.queue.append(investor);
-      storage.queue.append({ ...investor, slug: 'second-investor' });
-      let calls = 0;
-      const messenger = {
+  await assert.rejects(
+    runSend({
+      ...f.options,
+      config: { ...f.options.config, mode: 'live' },
+      messenger: {
         openComposer: async () => {
-          if (calls++ === 0 && stage === 'unavailable')
-            throw new MessagingUnavailableError('InMail credits required');
-          if (stage === 'open') throw new Error('Unknown layout');
-          return {
-            kind: 'chat' as const,
-            fill: async () => {
-              if (stage === 'fill') throw new Error('Existing draft');
-            },
-          };
+          throw failure;
         },
-      };
-      if (stage === 'unavailable') {
-        await runMessages({ ...options, messenger });
-        assert.equal(storage.queue.rows()[0]?.status, 'failed');
-        assert.equal(
-          storage.queue.rows()[0]?.failure,
-          'InMail credits required',
-        );
-        assert.equal(storage.queue.rows()[1]?.status, 'dryrun');
-      } else {
-        await assert.rejects(runMessages({ ...options, messenger }));
-        assert.equal(storage.queue.rows()[0]?.status, 'working');
-        assert.equal(storage.queue.rows()[1]?.status, 'new');
-      }
-    });
-  }
+      },
+    }),
+    /Account checkpoint/,
+  );
+  assert.equal(f.storage.messages.rows()[0]?.status, 'new');
 });
 
-test('browser closure during fill leaves the selected row working', async (t) => {
-  const { options, storage } = await setup(t);
-  options.config.mode = 'dryrun-browser';
-  storage.queue.append(investor);
-  const controller = new AbortController();
+test('interruption after clicking leaves a durable failed marker and stops later messages', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages(2);
+  await assert.rejects(
+    runSend({
+      ...f.options,
+      config: { ...f.options.config, mode: 'live' },
+      messenger: {
+        openComposer: async () => ({
+          kind: 'chat',
+          fill: async () => {},
+          send: async (beforeClick) => {
+            beforeClick();
+            f.controller.abort(new ApplicationError('Interrupted'));
+            throw new ApplicationError('Interrupted');
+          },
+        }),
+      },
+    }),
+    /Interrupted/,
+  );
+  assert.equal(f.storage.messages.rows()[0]?.failure, SEND_UNCERTAIN_FAILURE);
+  assert.equal(f.storage.messages.rows()[1]?.status, 'new');
+});
+
+test('terminal output failure remains new and does not block the following message', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages(2);
+  let outputs = 0;
+  const result = await runSend({
+    ...f.options,
+    output: async () => {
+      if (++outputs === 1) throw new Error('Output unavailable');
+    },
+  });
+  assert.equal(result.skipped, 1);
+  assert.equal(result.completed, 1);
+  assert.equal(f.storage.messages.rows()[0]?.status, 'new');
+  assert.equal(f.storage.messages.rows()[1]?.status, 'dryrun');
+});
+
+test('send does not click when saving the durable attempt fails', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages(2);
+  let clicks = 0;
   const messenger = {
-    openComposer: async () => ({
-      kind: 'chat' as const,
-      fill: async () => {
-        controller.abort(new Error('Browser closed'));
+    openComposer: async (): Promise<MessageComposer> => ({
+      kind: 'chat',
+      fill: async () => {},
+      send: async (beforeClick) => {
+        beforeClick();
+        clicks++;
       },
     }),
   };
   await assert.rejects(
-    runMessages({ ...options, signal: controller.signal, messenger }),
-    /Browser closed/,
+    runSend({
+      ...f.options,
+      config: { ...f.options.config, mode: 'live' },
+      messages: {
+        ...f.storage.messages,
+        finish: () => {
+          throw new StorageError('Cannot persist attempt');
+        },
+      },
+      messenger,
+    }),
+    /Cannot persist attempt/,
   );
-  assert.equal(storage.queue.rows()[0]?.status, 'working');
+  assert.equal(clicks, 0);
+  assert.equal(f.storage.messages.counts().new, 2);
 });
 
-test('draft verification failures are recorded failed and the browser batch continues to the next profile', async (t) => {
-  const { DraftVerificationError } = await import('../src/shared/errors.ts');
-  const { options, storage, output } = await setup(t);
-  options.config.mode = 'dryrun-browser';
-  options.config.max_profiles_per_run = 10;
-  for (let i = 0; i < 3; i++)
-    storage.queue.append({ ...investor, slug: `investor-${i}` });
-  const logs: string[] = [];
-  options.log = (text) => logs.push(text);
-  const opened: string[] = [];
-  const messenger = {
-    openComposer: async (recipient: typeof investor) => {
-      opened.push(recipient.slug);
-      return {
-        kind: 'inmail' as const,
-        fill: async () => {
-          if (recipient.slug === 'investor-0')
-            throw new DraftVerificationError(
-              'Draft verification failed: message body differs',
-            );
-        },
-      };
+test('send delivers stored text without repeating writing-stage content validation', async (t) => {
+  const f = await fixture(t);
+  f.seedMessages();
+  const row = f.storage.messages.next([])!;
+  let filled = '';
+  const result = await runSend({
+    ...f.options,
+    config: { ...f.options.config, mode: 'dryrun-browser' },
+    messages: {
+      ...f.storage.messages,
+      next: (excluded) =>
+        excluded.includes(row.id)
+          ? undefined
+          : { ...row, message: '[Your Name]' },
     },
-  };
-  assert.deepEqual(await runMessages({ ...options, messenger }), {
-    processed: 3,
-    displayed: 2,
+    messenger: {
+      openComposer: async () => ({
+        kind: 'chat',
+        fill: async (draft) => {
+          filled = draft.body;
+        },
+      }),
+    },
   });
-  assert.deepEqual(opened, ['investor-0', 'investor-1', 'investor-2']);
-  assert.deepEqual(
-    storage.queue.rows().map((row) => row.status),
-    ['failed', 'dryrun', 'dryrun'],
-  );
-  assert.match(storage.queue.rows()[0]!.failure, /message body differs/);
-  assert.match(logs.join('\n'), /Continuing to the next profile/);
-  assert.equal(output.length, 0);
+  assert.equal(filled, '[Your Name]');
+  assert.equal(result.completed, 1);
+  assert.equal(f.storage.messages.rows()[0]?.status, 'dryrun');
 });

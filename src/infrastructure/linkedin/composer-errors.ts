@@ -16,5 +16,5 @@ export function composerFailure(
     .replace(/https?:\/\/[^\s'"<>]+/gi, '[URL]')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .slice(0, 400);
-  return `LinkedIn draft preparation failed while ${stage}. ${clean}. Review the browser; queue row remains working.`;
+  return `LinkedIn draft preparation failed while ${stage}. ${clean}. Review the browser.`;
 }

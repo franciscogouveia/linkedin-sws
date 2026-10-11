@@ -1,8 +1,11 @@
 # Copy to config.yaml. All application settings live here; the CLI takes no arguments.
-# Use dryrun-browser to fill drafts in separate tabs without sending.
+# dev:search validates profiles; dev:write persists messages; dev:send uses this mode.
+# dryrun-browser fills drafts without sending; live also clicks Send.
 mode: dryrun-terminal
 pitch_path: pitch.md
+# One SQLite file holds profiles and messaging tables; legacy databases need replacing.
 queue_path: data/queue.sqlite
+# Independent attempt limit for dev:write and dev:send (including skipped rows).
 max_profiles_per_run: 1
 
 # Optional facts used in message generation. Replace examples with your real facts,

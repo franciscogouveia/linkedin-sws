@@ -11,18 +11,22 @@
   "scripts": {
     "dev": "node src/app/cli/all.ts",
     "dev:search": "node src/app/cli/search.ts",
-    "dev:message": "node src/app/cli/message.ts",
     "queue:reset-dryruns": "node src/app/cli/reset-dryruns.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/app/cli/all.js",
     "start:search": "node dist/app/cli/search.js",
-    "start:message": "node dist/app/cli/message.js",
     "typecheck": "tsc --noEmit",
     "test": "node --test --test-isolation=none tests/*.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm test && npm run format:check",
-    "browser:install": "playwright install chromium"
+    "browser:install": "playwright install chromium",
+    "dev:write": "node src/app/cli/write.ts",
+    "start:write": "node dist/app/cli/write.js",
+    "dev:send": "node src/app/cli/send.ts",
+    "start:send": "node dist/app/cli/send.js",
+    "queue:clear-messages": "node src/app/cli/clear-messages.ts",
+    "queue:clear-profiles": "node src/app/cli/clear-profiles.ts"
   },
   "dependencies": {
     "openai": "7.30.1",
