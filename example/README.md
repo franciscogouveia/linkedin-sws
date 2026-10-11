@@ -94,7 +94,7 @@ Well, you saw the output in the terminal, because it used `dryrun-terminal` mode
 
 Otherwise, with `dryrun-browser` mode, a message would be placed on the profile's chat form, but not sent.
 
-With `live` mode, the same as `dryrun-browser` would happen, but the message would be actually automatically sent. *To be implemented.*
+With `live` mode, the same as `dryrun-browser` would happen, but the message would be actually automatically sent.
 
 ## Note
 
