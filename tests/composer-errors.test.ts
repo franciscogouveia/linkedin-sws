@@ -119,7 +119,7 @@ test('composer errors identify profile wait, Message click, and composer wait se
   }
 });
 
-test('a standard messaging anchor is followed after full profile load without an inert click', async () => {
+test('a verified profile slug permits display-name differences and follows its anchor after full load', async () => {
   const events: string[] = [];
   let url = `https://www.linkedin.com/in/${investor.slug}/`;
   const locator = {
@@ -168,7 +168,10 @@ test('a standard messaging anchor is followed after full profile load without an
     locator: () => locator,
     frames: () => [frame],
     waitForFunction: async () => ({
-      jsonValue: async () => ({ kind: 'profile', name: investor.name }),
+      jsonValue: async () => ({
+        kind: 'profile',
+        name: `${investor.name}, PhD`,
+      }),
       dispose: async () => {},
     }),
   };

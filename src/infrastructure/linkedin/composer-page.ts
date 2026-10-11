@@ -22,22 +22,8 @@ export function inspectComposer(input: {
     ),
   ].filter(visible);
   if (location.pathname.startsWith('/messaging/')) {
-    const main = document.querySelector('main');
-    if (main) roots.push(main);
-  }
-  const blocked =
-    /(?:upgrade|premium|purchase|buy).{0,80}(?:inmail|message)|(?:inmail|messag(?:e|ing)).{0,80}(?:upgrade|premium required|not available|unavailable|cannot|can't|not allowed)|out of inmail credits|(?:cannot|can't|unable to|not allowed to) (?:send (?:a )?(?:message|inmail)|message)/i;
-  for (const root of roots) {
-    const text = root.textContent ?? '';
-    if (
-      blocked.test(text) &&
-      !root.querySelector('[contenteditable="true"], textarea')
-    ) {
-      return {
-        kind: 'unavailable' as const,
-        reason: 'LinkedIn messaging unavailable or requires an upgrade/credits',
-      };
-    }
+    const main = document.querySelector('main, [role="main"]');
+    if (main && visible(main)) roots.push(main);
   }
   const matches: { root: Element; body: Element; subject?: Element }[] = [];
   for (const root of roots) {
@@ -45,17 +31,18 @@ export function inspectComposer(input: {
     // recipient. Prefer the conversation header when its profile link exists.
     const outsideMessage = (node: Element) =>
       !node.closest(
-        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav',
+        '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
       );
     const profileLinks = [...root.querySelectorAll('a[href*="/in/"]')].filter(
       (node) => visible(node) && outsideMessage(node),
     );
-    const headerLinks = profileLinks.filter((node) =>
+    // Only recipient/header links constrain identity. Other profile links in the
+    // pane must not reject an exact active-recipient name match.
+    const links = profileLinks.filter((node) =>
       node.closest(
-        'header, h1, h2, h3, [role="heading"], .msg-overlay-bubble-header, .msg-thread__top-card, .msg-thread__link-to-profile',
+        'header, h1, h2, h3, [role="heading"], .msg-overlay-bubble-header, .msg-thread__top-card, .msg-thread__link-to-profile, .msg-thread__heading, .msg-entity-lockup',
       ),
     );
-    const links = headerLinks.length ? headerLinks : profileLinks;
     const matchingSlug =
       links.length > 0 &&
       links.every((link) => {
@@ -72,7 +59,7 @@ export function inspectComposer(input: {
       });
     const names = [
       ...root.querySelectorAll(
-        'h1, h2, h3, [role="heading"], .msg-overlay-bubble-header__title, .msg-conversation-listitem__participant-names, .msg-thread__link-to-profile, [data-recipient-name]',
+        'h1, h2, h3, [role="heading"], header a, header button, header span, .msg-overlay-bubble-header__title, .msg-thread__link-to-profile, .msg-thread__heading, .msg-thread__topic, .msg-entity-lockup__entity-title, .msg-entity-lockup__entity-title > span, .msg-form__recipient, .msg-connections-typeahead__recipient, [data-recipient-name]',
       ),
     ].filter((node) => visible(node) && outsideMessage(node));
     if (
@@ -80,7 +67,9 @@ export function inspectComposer(input: {
         ? !matchingSlug
         : !names.some(
             (node) =>
-              normalize(node.textContent ?? '') === normalize(input.name),
+              normalize(node.textContent ?? '') === normalize(input.name) ||
+              normalize(node.getAttribute('aria-label') ?? '') ===
+                normalize(input.name),
           )
     )
       continue;
@@ -100,7 +89,8 @@ export function inspectComposer(input: {
         ),
     );
     if (subjects.length > 1 || bodies.length !== 1) continue;
-    if (/\binmail\b/i.test(textOf(root)) && subjects.length !== 1) continue;
+    // A subject field identifies InMail. UI labels and container text are hints,
+    // not extra gates: one recipient-owned editor is enough to prepare a draft.
     matches.push({
       root,
       body: bodies[0]!,
@@ -112,6 +102,24 @@ export function inspectComposer(input: {
     (match, index) =>
       matches.findIndex((other) => other.body === match.body) === index,
   );
+  if (!unique.length) {
+    const blocked =
+      /(?:upgrade|premium|purchase|buy).{0,80}(?:inmail|message)|(?:inmail|messag(?:e|ing)).{0,80}(?:upgrade|premium required|not available|unavailable|cannot|can't|not allowed)|out of inmail credits|(?:cannot|can't|unable to|not allowed to) (?:send (?:a )?(?:message|inmail)|message)/i;
+    for (const root of roots) {
+      const text = root.textContent ?? '';
+      if (
+        blocked.test(text) &&
+        !root.querySelector('[contenteditable="true"], textarea')
+      ) {
+        return {
+          kind: 'unavailable' as const,
+          reason:
+            'LinkedIn messaging unavailable or requires an upgrade/credits',
+        };
+      }
+    }
+    return false;
+  }
   if (unique.length !== 1) return false;
   const match = unique[0]!;
   // React can replace the editor or move from InMail to a conversation thread.
@@ -130,9 +138,6 @@ export function inspectComposer(input: {
   match.body.setAttribute('data-sws-body', input.token);
   match.subject?.setAttribute('data-sws-subject', input.token);
   return { kind: match.subject ? ('inmail' as const) : ('chat' as const) };
-  function textOf(element: Element) {
-    return element.textContent ?? '';
-  }
 }
 
 /** Structure and known UI labels only; never saves profile or message text. */
@@ -218,6 +223,67 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
               })()
             : null,
       })),
+    // Report all candidate containers, including the full message center.
+    composerCandidates: [
+      ...document.querySelectorAll(
+        '[role="dialog"], .msg-overlay-conversation-bubble, .msg-convo-wrapper, .msg-thread, main, [role="main"]',
+      ),
+    ]
+      .filter(visible)
+      .map((root) => {
+        const outsideMessage = (node: Element) =>
+          !node.closest(
+            '[contenteditable], textarea, .msg-s-message-list, .msg-s-event-listitem, .msg-s-message-group, aside, nav, [role="complementary"], .msg-conversations-container__conversations-list, .msg-conversation-list, .msg-conversation-listitem',
+          );
+        const names = [
+          ...root.querySelectorAll(
+            'h1, h2, h3, [role="heading"], header a, header button, header span, .msg-overlay-bubble-header__title, .msg-thread__link-to-profile, .msg-thread__heading, .msg-thread__topic, .msg-entity-lockup__entity-title, .msg-entity-lockup__entity-title > span, .msg-form__recipient, .msg-connections-typeahead__recipient, [data-recipient-name]',
+          ),
+        ].filter((node) => visible(node) && outsideMessage(node));
+        const links = [...root.querySelectorAll('a[href*="/in/"]')].filter(
+          (node) => visible(node) && outsideMessage(node),
+        );
+        const fields = [
+          ...root.querySelectorAll('[contenteditable="true"], textarea'),
+        ].filter(visible);
+        return {
+          recipientNameCandidates: names.length,
+          recipientNameMatches: names.filter(
+            (node) =>
+              normalize(node.textContent ?? '') === normalize(input.name) ||
+              normalize(node.getAttribute('aria-label') ?? '') ===
+                normalize(input.name),
+          ).length,
+          recipientProfileLinks: links.length,
+          recipientSlugMatches: links.filter((node) => {
+            try {
+              const url = new URL((node as HTMLAnchorElement).href);
+              return (
+                ['www.linkedin.com', 'linkedin.com'].includes(url.hostname) &&
+                decodeURIComponent(url.pathname).replace(/\/$/, '') ===
+                  `/in/${input.slug}`
+              );
+            } catch {
+              return false;
+            }
+          }).length,
+          editableFields: fields.length,
+          inmailEditorLabels: fields.filter((node) =>
+            /\binmail\b/i.test(
+              [
+                node.getAttribute('aria-label'),
+                node.getAttribute('placeholder'),
+                node.getAttribute('data-placeholder'),
+              ].join(' '),
+            ),
+          ).length,
+          subjectFields: [
+            ...root.querySelectorAll(
+              'input[name*="subject" i], input[placeholder*="subject" i], input[aria-label*="subject" i], textarea[name*="subject" i], textarea[placeholder*="subject" i]',
+            ),
+          ].filter(visible).length,
+        };
+      }),
     composerRecipientLinks: dialogs.filter(visible).filter((root) =>
       [...root.querySelectorAll('a[href*="/in/"]')].some((node) => {
         try {

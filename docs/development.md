@@ -240,7 +240,14 @@ guarantee classification accuracy. Uncertain assessments become `failed` with
 Search/profile layout reports under `data/diagnostics/` contain structure and
 counts without profile text, identifiers, query parameters, or cookies. Composer
 reports include the processing stage, Message action, visible dialogs, editors,
-frames, and popup counts without draft text. Browser failures preserve the first
+frames, and popup counts without draft text. `composerCandidates` also reports
+recipient-name matches, profile-link matches, editor counts, and InMail editor
+labels for each visible message container, including the full message center.
+Composer detection requires a matching recipient header slug (or exact active
+recipient name when no header slug is available) and one message editor. Other
+profile links and UI labels do not reject the composer. An available subject
+field identifies InMail; other forms are prepared as chats. Draft readback and
+recipient verification before live sending remain in place. Browser failures preserve the first
 line of the underlying error; the workflow reports the resulting row status.
 
 LinkedIn layouts change; fixture checks cannot prove compatibility with a live

@@ -81,9 +81,7 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         if (
           !state ||
           state.kind !== 'profile' ||
-          profileSlug(page.url()) !== recipient.slug ||
-          state.name.replace(/\s+/g, ' ').trim().toLowerCase() !==
-            recipient.name.replace(/\s+/g, ' ').trim().toLowerCase()
+          profileSlug(page.url()) !== recipient.slug
         )
           throw new ApplicationError(
             'Cannot verify the draft recipient profile.',
