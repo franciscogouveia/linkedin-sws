@@ -77,13 +77,11 @@ export async function waitForComposer(
     }
     if (matches.length > 1)
       throw new ApplicationError(
-        'Multiple recipient message composers found. Review the browser; queue row remains working.',
+        'Multiple recipient message composers found. Review the browser.',
       );
     if (matches[0]) return matches[0];
     if (pages().every((page) => page.isClosed()))
-      throw new ApplicationError(
-        'Recipient message tab was closed. Queue row remains working.',
-      );
+      throw new ApplicationError('Recipient message tab was closed.');
     await setTimeout(
       Math.min(100, Math.max(1, deadline - Date.now())),
       undefined,
@@ -91,6 +89,6 @@ export async function waitForComposer(
     );
   } while (Date.now() < deadline);
   throw new ApplicationError(
-    `Message action opened no recognized recipient editor in its tab, new tabs, or visible LinkedIn frames within ${timeout} ms. Queue row remains working.`,
+    `Message action opened no recognized recipient editor in its tab, new tabs, or visible LinkedIn frames within ${timeout} ms.`,
   );
 }

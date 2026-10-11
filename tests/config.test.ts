@@ -19,9 +19,9 @@ test('configuration resolves paths against its location and sets small prototype
   assert.equal(config.max_profiles_per_run, 1);
 });
 
-test('configuration rejects live mode, unsupported filters, duplicate keys, and invalid limits', () => {
+test('configuration rejects unsupported modes, filters, duplicate keys, and invalid limits', () => {
   for (const text of [
-    configYaml.replace('mode: dryrun-terminal', 'mode: live'),
+    configYaml.replace('mode: dryrun-terminal', 'mode: invalid'),
     configYaml.replace('search:', 'search:\n  location: London'),
     configYaml.replace('search:', 'search:\n  max_results: -1'),
     `${configYaml}\nmode: dryrun-terminal`,
@@ -171,5 +171,15 @@ test('both dry-run modes are accepted; the former mode has migration guidance', 
         '/tmp/config.yaml',
       ),
     /Rename mode: dryrun to mode: dryrun-terminal/,
+  );
+});
+
+test('live mode is accepted explicitly', () => {
+  assert.equal(
+    parseConfig(
+      configYaml.replace('dryrun-terminal', 'live'),
+      '/tmp/config.yaml',
+    ).mode,
+    'live',
   );
 });

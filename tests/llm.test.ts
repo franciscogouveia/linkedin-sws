@@ -316,7 +316,7 @@ test('a generated placeholder stops processing rather than being accepted as a f
   );
   await assert.rejects(
     writer.write(profile, 'Our business pitch'),
-    /unresolved placeholders.*Queue row remains working/,
+    /unresolved placeholders/,
   );
 });
 
@@ -467,7 +467,7 @@ test('network failures retain nested socket diagnostics and request context', as
     assert.match(error.message, /code=ECONNREFUSED/);
     assert.match(error.message, /address=192\.168\.0\.2; port=11434/);
     assert.match(error.message, /model: test-model/);
-    assert.match(error.message, /Queue row remains working/);
+    assert.ok(!error.message.includes('Queue row remains working'));
     return true;
   });
   assert.equal(fetch.mock.callCount(), 1);

@@ -52,7 +52,7 @@ function profileFromState(
 ): Profile {
   if (!state || state.kind !== 'profile') {
     throw new ApplicationError(
-      'Cannot read the LinkedIn profile layout. Use an English interface and review the browser; queue row remains working.',
+      'Cannot read the LinkedIn profile layout. Use an English interface and review the browser.',
     );
   }
   return profileData(state, slug);
@@ -104,13 +104,11 @@ export class LinkedInBrowser implements LinkedInReader {
       )?.status();
     } catch {
       this.signal.throwIfAborted();
-      throw new ApplicationError(
-        'LinkedIn navigation failed or timed out. Stopping without changing the selected row.',
-      );
+      throw new ApplicationError('LinkedIn navigation failed or timed out.');
     }
     await assertLinkedInPage(this.page);
     if (status && status >= 400 && status !== 404) {
-      throw new ApplicationError(`LinkedIn returned HTTP ${status}. Stopping.`);
+      throw new ApplicationError(`LinkedIn returned HTTP ${status}.`);
     }
     return status;
   }
@@ -160,7 +158,7 @@ export class LinkedInBrowser implements LinkedInReader {
       await assertLinkedInPage(this.page);
       const diagnostic = await this.layoutDiagnostic('profile', expectedName);
       throw new ApplicationError(
-        `Cannot read the LinkedIn profile after waiting for its name and content.${diagnostic} Queue row remains working.`,
+        `Cannot read the LinkedIn profile after waiting for its name and content.${diagnostic}`,
       );
     }
   }
@@ -214,7 +212,7 @@ export class LinkedInBrowser implements LinkedInReader {
     const actualSlug = profileSlug(this.page.url());
     if (actualSlug !== slug) {
       throw new ApplicationError(
-        'LinkedIn redirected to a different profile. Stopping for manual review.',
+        'LinkedIn redirected to a different profile; recipient could not be verified.',
       );
     }
     return profileFromState(state, slug);

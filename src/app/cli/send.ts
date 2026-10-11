@@ -1,3 +1,3 @@
 import { startCli } from './run.ts';
 
-startCli('message');
+startCli('send');

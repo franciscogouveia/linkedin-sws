@@ -4,7 +4,7 @@
 
 This is a fun experiment and proof of concept that leverages LLMs to post-filter search results by validating that the profile is of an investor and then generating a message asking for funding.
 
-For now, only dry-run is implemented. Messages can be printed in the terminal (`dryrun-terminal`) or filled into LinkedIn message drafts for review (`dryrun-browser`). Neither mode sends messages.
+Messages can be printed in the terminal (`dryrun-terminal`), filled into LinkedIn drafts for review (`dryrun-browser`), or sent automatically (`live`). Only live mode presses Send.
 
 # LinkedIn Search-Write-Send
 
@@ -18,9 +18,9 @@ Give founders a simple way to turn their investor criteria and business story in
 
 ## How It Works
 
-1. **Search:** Find angel investors on LinkedIn using criteria supplied in a YAML file.
-2. **Write:** Generate a personalized message for each investor using the founder's business description and funding pitch, supplied in a Markdown file.
-3. **Send:** Deliver each personalized pitch as a direct message to its intended recipient on LinkedIn, or prepare it for review during a dry run. Sending is a future milestone.
+1. **Search:** Find profiles using YAML criteria, validate investor status with the LLM, and save accepted profiles and validation failures.
+2. **Write:** Reopen each accepted profile, generate a personalized subject and message using the Markdown pitch and founder context, and save them in SQLite.
+3. **Send:** Deliver the saved messages to LinkedIn, prepare browser drafts, or display them in the terminal. This stage does not call the LLM.
 
 ## Founder Inputs
 
@@ -33,11 +33,19 @@ These files let founders express whom they want to reach and what they want to c
 
 - **`dryrun-terminal`:** Display generated messages in the terminal.
 - **`dryrun-browser`:** Open a separate tab per recipient and fill the message body, plus a subject for InMail. Review drafts, then close the browser to finish. The tool never presses Send.
-- **Send mode (planned):** Deliver personalized messages on LinkedIn. Live mode is currently rejected.
+- **`live`:** Prepare and verify each message as in browser dry-run mode, then click Send and record confirmed messages as `sent`.
 
-Select the mode in `config.yaml`; no CLI arguments are required. Both dry-run modes record queue status `dryrun`, and `npm run queue:reset-dryruns` returns those rows to `new` for testing. Browser mode preserves existing nonempty drafts and stops for review. Draft text is not stored locally, and LinkedIn may not retain drafts after the browser closes.
+Select the mode in `config.yaml`; no CLI arguments are required. Both dry-run modes record message status `dryrun`. `npm run queue:reset-dryruns` requeues those saved messages without regenerating them. Browser modes reuse matching drafts and preserve conflicting text. Preparation failures remain `new` for retry; submission failures remain `failed` for manual review. The browser stays open for inspection until you close it.
 
-See [setup and commands](docs/development.md) for `npm run dev:search` and `npm run dev:message`.
+## Run the Stages
+
+```bash
+npm run dev:search
+npm run dev:write
+npm run dev:send
+```
+
+Run stages independently or use `npm run dev` for all three. Profiles and generated messages are persisted in separate SQLite tables, so delivery can run later without rewriting messages. See [setup, recovery, and commands](docs/development.md).
 
 ## LLM Compatibility
 

@@ -1,5 +1,5 @@
 import type { Page } from 'playwright';
-import { ApplicationError } from '../../shared/errors.ts';
+import { LinkedInSessionError } from '../../shared/errors.ts';
 export function profileSlug(href: string): string | undefined {
   try {
     const url = new URL(href, 'https://www.linkedin.com');
@@ -35,17 +35,17 @@ export async function pageText(page: Page): Promise<string> {
 export async function assertLinkedInPage(page: Page): Promise<void> {
   const url = new URL(page.url());
   if (!['www.linkedin.com', 'linkedin.com'].includes(url.hostname)) {
-    throw new ApplicationError(
+    throw new LinkedInSessionError(
       'LinkedIn redirected outside its website. Stopping.',
     );
   }
   if (loginPath.test(url.pathname)) {
-    throw new ApplicationError(
+    throw new LinkedInSessionError(
       'LinkedIn authentication expired. Restart and sign in manually.',
     );
   }
   if (checkpointPath.test(url.pathname)) {
-    throw new ApplicationError(
+    throw new LinkedInSessionError(
       'LinkedIn requires a security checkpoint. Stopping; resolve it manually before restarting.',
     );
   }
@@ -65,7 +65,7 @@ export async function assertLinkedInPage(page: Page): Promise<void> {
     notices.some((text) => restrictionText.test(text)) ||
     (!hasProfile && restrictionText.test(mainText))
   ) {
-    throw new ApplicationError(
+    throw new LinkedInSessionError(
       'LinkedIn displayed an account or automation warning. Stopping.',
     );
   }

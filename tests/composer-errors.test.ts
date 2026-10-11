@@ -184,3 +184,24 @@ test('a standard messaging anchor is followed after full profile load without an
     'messaging navigation',
   ]);
 });
+
+test('account guard errors retain their fatal type across composer diagnostics', async () => {
+  const { LinkedInSessionError } = await import('../src/shared/errors.ts');
+  const checkpoint = new LinkedInSessionError('Account checkpoint');
+  const page = {
+    on: () => {},
+    removeListener: () => {},
+    bringToFront: async () => {
+      throw checkpoint;
+    },
+    isClosed: () => true,
+  } as unknown as Page;
+  const context = { newPage: async () => page } as unknown as BrowserContext;
+  await assert.rejects(
+    new LinkedInMessengerBrowser(
+      context,
+      new AbortController().signal,
+    ).openComposer(investor),
+    (error: unknown) => error === checkpoint,
+  );
+});

@@ -6,7 +6,7 @@ import { ApplicationError } from '../shared/errors.ts';
 
 const nonempty = z.string().trim().min(1);
 const configSchema = z.strictObject({
-  mode: z.enum(['dryrun-terminal', 'dryrun-browser']),
+  mode: z.enum(['dryrun-terminal', 'dryrun-browser', 'live']),
   pitch_path: nonempty,
   queue_path: nonempty,
   outreach: z

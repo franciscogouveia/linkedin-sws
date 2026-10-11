@@ -206,7 +206,7 @@ test('profile timeout records structure and never becomes a missing-profile resu
       new AbortController().signal,
       directory,
     ).readProfile(investor.slug, investor.name),
-    /Cannot read.*profile-layout-.*Queue row remains working/,
+    /Cannot read.*profile-layout-/,
   );
   const files = await readdir(directory);
   assert.equal(files.length, 1);

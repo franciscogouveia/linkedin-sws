@@ -114,6 +114,19 @@ export function inspectComposer(input: {
   );
   if (unique.length !== 1) return false;
   const match = unique[0]!;
+  // React can replace the editor or move from InMail to a conversation thread.
+  // Remove stale markers so field/button locators keep one recipient-owned target.
+  for (const [attribute, selected] of [
+    ['data-sws-composer', match.root],
+    ['data-sws-body', match.body],
+    ['data-sws-subject', match.subject],
+  ] as const) {
+    for (const node of document.querySelectorAll(`[${attribute}]`)) {
+      if (node.getAttribute(attribute) === input.token && node !== selected)
+        node.removeAttribute(attribute);
+    }
+  }
+  match.root.setAttribute('data-sws-composer', input.token);
   match.body.setAttribute('data-sws-body', input.token);
   match.subject?.setAttribute('data-sws-subject', input.token);
   return { kind: match.subject ? ('inmail' as const) : ('chat' as const) };

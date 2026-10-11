@@ -11,15 +11,24 @@ function fixture(
   kind: 'chat' | 'inmail',
   recipient = investor.slug,
   existing = '',
+  existingSubject = '',
 ) {
   return `${header}<script>
     window.sent = 0;
     document.querySelector('#message').onclick = () => {
       const composer = document.createElement('div');
       composer.setAttribute('role', 'dialog');
-      composer.innerHTML = '<h2><a href="/in/${recipient}/">Alex Example</a></h2>${kind === 'inmail' ? '<input aria-label="Subject" placeholder="Subject">' : ''}<div role="textbox" contenteditable="true">${existing}</div><button id="send">Send</button>';
+      composer.innerHTML = '<h2><a href="/in/${recipient}/">Alex Example</a></h2>${kind === 'inmail' ? `<input aria-label="Subject" placeholder="Subject" value="${existingSubject}">` : ''}<div role="textbox" contenteditable="true">${existing}</div><button id="send">Send</button>';
       document.body.append(composer);
-      composer.querySelector('#send').onclick = () => window.sent++;
+      composer.querySelector('#send').onclick = () => {
+        window.sent++;
+        const editor = composer.querySelector('[contenteditable]');
+        const message = document.createElement('p');
+        message.className = 'msg-s-event-listitem__body';
+        message.textContent = editor.innerText;
+        composer.append(message);
+        editor.textContent = '';
+      };
       composer.onkeydown = (event) => { if (event.key === 'Enter') window.sent++; };
     };
   </script>`;
@@ -65,6 +74,101 @@ test(
         await context.close();
       });
     }
+    for (const kind of ['chat', 'inmail'] as const) {
+      await t.test(
+        `live send ${kind} clicks exactly once after verification`,
+        async () => {
+          const context = await browser.newContext();
+          context.setDefaultTimeout(500);
+          await context.route('**/*', (route) =>
+            route.fulfill({ contentType: 'text/html', body: fixture(kind) }),
+          );
+          const composer = await new LinkedInMessengerBrowser(
+            context,
+            new AbortController().signal,
+            undefined,
+            500,
+          ).openComposer(investor);
+          await composer.fill({
+            body: 'Hello Alex, could we discuss funding?',
+            ...(kind === 'inmail' ? { subject: 'Funding Acme' } : {}),
+          });
+          let recorded = false;
+          await composer.send!(() => {
+            recorded = true;
+          });
+          assert.equal(recorded, true);
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(() => (window as unknown as { sent: number }).sent),
+            1,
+          );
+          await assert.rejects(
+            composer.send!(() => {
+              throw new Error('Must not record twice');
+            }),
+            /No verified unsent draft/,
+          );
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(() => (window as unknown as { sent: number }).sent),
+            1,
+          );
+          await context.close();
+        },
+      );
+    }
+    await t.test(
+      'live send rechecks text changes and refuses ambiguous Send controls',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        await context.route('**/*', (route) =>
+          route.fulfill({ contentType: 'text/html', body: fixture('chat') }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        await composer.fill({ body: 'Funding Acme' });
+        await context
+          .pages()[0]!
+          .locator('[contenteditable]')
+          .fill('Changed pitch');
+        await assert.rejects(
+          composer.send!(() => {
+            throw new Error('Must not record');
+          }),
+          /message body differs/,
+        );
+        await context
+          .pages()[0]!
+          .locator('[contenteditable]')
+          .fill('Funding Acme');
+        await context.pages()[0]!.evaluate(() => {
+          document
+            .querySelector('[role=dialog]')!
+            .insertAdjacentHTML('beforeend', '<button>Send</button>');
+        });
+        await assert.rejects(
+          composer.send!(() => {
+            throw new Error('Must not record');
+          }),
+          /single enabled Send/,
+        );
+        assert.equal(
+          await context
+            .pages()[0]!
+            .evaluate(() => (window as unknown as { sent: number }).sent),
+          0,
+        );
+        await context.close();
+      },
+    );
     for (const layout of ['link', 'frame', 'popup'] as const) {
       await t.test(`messaging in ${layout}`, async () => {
         const context = await browser.newContext();
@@ -156,6 +260,108 @@ test(
             .pages()[0]!
             .evaluate(() => (window as unknown as { sent: number }).sent),
           0,
+        );
+        await context.close();
+      },
+    );
+    for (const [kind, existingBody, existingSubject] of [
+      ['chat', 'Funding Acme', ''],
+      ['inmail', 'Funding Acme', 'Funding round'],
+      ['inmail', 'Funding Acme', ''],
+      ['inmail', '', 'Funding round'],
+    ] as const) {
+      await t.test(
+        `reuse ${kind} fields: body=${!!existingBody}, subject=${!!existingSubject}`,
+        async () => {
+          const context = await browser.newContext();
+          context.setDefaultTimeout(500);
+          await context.route('**/*', (route) =>
+            route.fulfill({
+              contentType: 'text/html',
+              body: fixture(kind, investor.slug, existingBody, existingSubject),
+            }),
+          );
+          const composer = await new LinkedInMessengerBrowser(
+            context,
+            new AbortController().signal,
+            undefined,
+            500,
+          ).openComposer(investor);
+          await context.pages()[0]!.evaluate(() => {
+            (window as unknown as { matchingEdits: number }).matchingEdits = 0;
+            for (const field of document.querySelectorAll<HTMLInputElement>(
+              '[contenteditable], input',
+            )) {
+              if (
+                (field.isContentEditable ? field.innerText : field.value).trim()
+              )
+                field.addEventListener('input', () => {
+                  (window as unknown as { matchingEdits: number })
+                    .matchingEdits++;
+                });
+            }
+          });
+          await composer.fill({
+            body: 'Funding Acme',
+            ...(kind === 'inmail' ? { subject: 'Funding round' } : {}),
+          });
+          assert.equal(
+            await context.pages()[0]!.locator('[contenteditable]').innerText(),
+            'Funding Acme',
+          );
+          if (kind === 'inmail')
+            assert.equal(
+              await context.pages()[0]!.locator('input').inputValue(),
+              'Funding round',
+            );
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(() => (window as unknown as { sent: number }).sent),
+            0,
+          );
+          assert.equal(
+            await context
+              .pages()[0]!
+              .evaluate(
+                () =>
+                  (window as unknown as { matchingEdits: number })
+                    .matchingEdits,
+              ),
+            0,
+          );
+          await context.close();
+        },
+      );
+    }
+    await t.test(
+      'conflicting subject preserves even an empty body',
+      async () => {
+        const context = await browser.newContext();
+        context.setDefaultTimeout(500);
+        await context.route('**/*', (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: fixture('inmail', investor.slug, '', 'Other funding'),
+          }),
+        );
+        const composer = await new LinkedInMessengerBrowser(
+          context,
+          new AbortController().signal,
+          undefined,
+          500,
+        ).openComposer(investor);
+        await assert.rejects(
+          composer.fill({ body: 'Funding Acme', subject: 'Funding round' }),
+          /conflicts/,
+        );
+        assert.equal(
+          await context.pages()[0]!.locator('[contenteditable]').innerText(),
+          '',
+        );
+        assert.equal(
+          await context.pages()[0]!.locator('input').inputValue(),
+          'Other funding',
         );
         await context.close();
       },

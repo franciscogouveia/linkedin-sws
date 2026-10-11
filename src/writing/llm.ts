@@ -54,7 +54,7 @@ export function parseAssessment(text: string, profile: Profile): Assessment {
     assessment = assessmentSchema.parse(JSON.parse(text));
   } catch {
     throw new ApplicationError(
-      'The LLM returned an invalid investor assessment. Queue row remains working.',
+      'The LLM returned an invalid investor assessment.',
     );
   }
   const normalize = (value: string) =>
@@ -150,7 +150,7 @@ export class LlmWriter implements PitchWriter {
       hasMessagePlaceholders(subject)
     ) {
       throw new ApplicationError(
-        'The LLM returned an invalid InMail subject (maximum 80 characters, no placeholders). Queue row remains working.',
+        'The LLM returned an invalid InMail subject (maximum 80 characters, no placeholders).',
       );
     }
     return subject;
@@ -194,12 +194,12 @@ Aim for 80 to 150 words, with a hard maximum of ${this.maxMessageCharacters} cha
     );
     if (hasMessagePlaceholders(message)) {
       throw new ApplicationError(
-        'The generated message contains unresolved placeholders. Fill in outreach context in config.yaml or clarify pitch.md, then rerun. Queue row remains working.',
+        'The generated message contains unresolved placeholders. Fill in outreach context in config.yaml or clarify pitch.md, then rerun.',
       );
     }
     if (message.length > this.maxMessageCharacters) {
       throw new ApplicationError(
-        'The generated message exceeded max_message_characters. Queue row remains working.',
+        'The generated message exceeded max_message_characters.',
       );
     }
     return message;

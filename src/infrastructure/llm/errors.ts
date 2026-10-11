@@ -66,6 +66,5 @@ export function describeLlmError(
   if (causes.length)
     details.push(`Details: ${causes.join(' -> ').slice(0, 3000)}`);
   else details.push(`Details: ${clean(error)}`);
-  details.push('Queue row remains working.');
   return details.join('\n');
 }
