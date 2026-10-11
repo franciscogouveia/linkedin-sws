@@ -1,5 +1,7 @@
 # Implementation Plan
 
+Current PoC supports `dryrun-terminal` and `dryrun-browser` (separate recipient tabs, verified draft text, no sending). Both complete with queue status `dryrun`; reset tooling returns these rows to `new`. The live-send sections below describe future work.
+
 ## Application Contract
 
 Build a local CLI in TypeScript with no arguments. One YAML file configures the application, including investor search criteria and live or dry-run mode. A separate Markdown file supplies the free-form business and funding pitch.

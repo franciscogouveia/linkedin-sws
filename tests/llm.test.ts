@@ -560,3 +560,36 @@ function createWriter(
     settings.max_message_characters,
   );
 }
+
+test('InMail subjects use the generated body and reject placeholders, excess length, and multiple lines', async () => {
+  let response = 'Funding Acme';
+  const writer = new LlmWriter(
+    {
+      request: async (request) => {
+        assert.equal(request.operation, 'subject generation');
+        assert.equal(JSON.parse(request.input).body, 'Our funding message');
+        assert.ok(request.redactions.includes('Our funding message'));
+        assert.equal(request.format, undefined);
+        return response;
+      },
+    },
+    1500,
+  );
+  assert.equal(
+    await writer.writeSubject(profile, 'Pitch', 'Our funding message'),
+    'Funding Acme',
+  );
+  for (const invalid of [
+    '',
+    '[Company Name]',
+    'x'.repeat(81),
+    'Line one\nLine two',
+    'Subject: Funding',
+  ]) {
+    response = invalid;
+    await assert.rejects(
+      writer.writeSubject(profile, 'Pitch', 'Our funding message'),
+      /invalid InMail subject/,
+    );
+  }
+});

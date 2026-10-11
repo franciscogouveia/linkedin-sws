@@ -6,7 +6,7 @@ import { ApplicationError } from '../shared/errors.ts';
 
 const nonempty = z.string().trim().min(1);
 const configSchema = z.strictObject({
-  mode: z.literal('dryrun'),
+  mode: z.enum(['dryrun-terminal', 'dryrun-browser']),
   pitch_path: nonempty,
   queue_path: nonempty,
   outreach: z
@@ -83,6 +83,16 @@ export function parseConfig(text: string, configPath: string): Config {
   } catch {
     // YAML errors can quote source lines containing credentials.
     throw new ApplicationError('config.yaml is not valid YAML.');
+  }
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'mode' in value &&
+    value.mode === 'dryrun'
+  ) {
+    throw new ApplicationError(
+      'Rename mode: dryrun to mode: dryrun-terminal (or use dryrun-browser to prepare browser drafts).',
+    );
   }
   const result = configSchema.safeParse(value);
   if (!result.success) {

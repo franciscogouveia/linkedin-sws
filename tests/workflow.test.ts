@@ -27,6 +27,7 @@ async function setup(t: Parameters<typeof temporaryDirectory>[0]) {
     readProfile: async () => profile,
   };
   const writer: PitchWriter = {
+    writeSubject: async () => 'Funding opportunity',
     classify: async () => ({
       decision: 'investor',
       evidence: investor.role,
@@ -275,4 +276,146 @@ test('rejected profiles count toward the limit and the stop summary reports pend
   assert.equal(output.length, 1);
   assert.match(logs.join('\n'), /1 failed this run; 3 pending/);
   assert.match(logs.join('\n'), /Stopped at max_profiles_per_run \(2\)/);
+});
+
+test('browser mode prepares each recipient and records dryrun only after verified fill', async (t) => {
+  const { options, storage, output } = await setup(t);
+  options.config.mode = 'dryrun-browser';
+  options.config.max_profiles_per_run = 2;
+  storage.queue.append(investor);
+  storage.queue.append({ ...investor, slug: 'second-investor' });
+  let subjects = 0;
+  options.writer.writeSubject = async (_profile, pitch, body, context) => {
+    assert.equal(pitch, options.pitch);
+    assert.match(body, /Hello Alex/);
+    assert.equal(context, options.config.outreach);
+    subjects++;
+    return 'Funding opportunity';
+  };
+  let opened = 0;
+  const messenger = {
+    openComposer: async (recipient: typeof investor) => {
+      const kind = opened++ === 0 ? ('chat' as const) : ('inmail' as const);
+      return {
+        kind,
+        fill: async (draft: { body: string; subject?: string }) => {
+          assert.equal(
+            storage.queue.rows().find((row) => row.slug === recipient.slug)
+              ?.status,
+            'working',
+          );
+          assert.equal(
+            draft.subject,
+            kind === 'inmail' ? 'Funding opportunity' : undefined,
+          );
+          assert.match(draft.body, /Hello Alex/);
+        },
+      };
+    },
+  };
+  assert.deepEqual(await runMessages({ ...options, messenger }), {
+    processed: 2,
+    displayed: 2,
+  });
+  assert.equal(subjects, 1);
+  assert.equal(storage.queue.counts().dryrun, 2);
+  assert.equal(output.length, 0);
+});
+
+test('browser layout and fill errors preserve working; explicit messaging unavailability continues the batch', async (t) => {
+  const { MessagingUnavailableError } = await import('../src/shared/errors.ts');
+  for (const stage of ['open', 'fill', 'unavailable'] as const) {
+    await t.test(stage, async (t) => {
+      const { options, storage } = await setup(t);
+      options.config.mode = 'dryrun-browser';
+      options.config.max_profiles_per_run = 2;
+      storage.queue.append(investor);
+      storage.queue.append({ ...investor, slug: 'second-investor' });
+      let calls = 0;
+      const messenger = {
+        openComposer: async () => {
+          if (calls++ === 0 && stage === 'unavailable')
+            throw new MessagingUnavailableError('InMail credits required');
+          if (stage === 'open') throw new Error('Unknown layout');
+          return {
+            kind: 'chat' as const,
+            fill: async () => {
+              if (stage === 'fill') throw new Error('Existing draft');
+            },
+          };
+        },
+      };
+      if (stage === 'unavailable') {
+        await runMessages({ ...options, messenger });
+        assert.equal(storage.queue.rows()[0]?.status, 'failed');
+        assert.equal(
+          storage.queue.rows()[0]?.failure,
+          'InMail credits required',
+        );
+        assert.equal(storage.queue.rows()[1]?.status, 'dryrun');
+      } else {
+        await assert.rejects(runMessages({ ...options, messenger }));
+        assert.equal(storage.queue.rows()[0]?.status, 'working');
+        assert.equal(storage.queue.rows()[1]?.status, 'new');
+      }
+    });
+  }
+});
+
+test('browser closure during fill leaves the selected row working', async (t) => {
+  const { options, storage } = await setup(t);
+  options.config.mode = 'dryrun-browser';
+  storage.queue.append(investor);
+  const controller = new AbortController();
+  const messenger = {
+    openComposer: async () => ({
+      kind: 'chat' as const,
+      fill: async () => {
+        controller.abort(new Error('Browser closed'));
+      },
+    }),
+  };
+  await assert.rejects(
+    runMessages({ ...options, signal: controller.signal, messenger }),
+    /Browser closed/,
+  );
+  assert.equal(storage.queue.rows()[0]?.status, 'working');
+});
+
+test('draft verification failures are recorded failed and the browser batch continues to the next profile', async (t) => {
+  const { DraftVerificationError } = await import('../src/shared/errors.ts');
+  const { options, storage, output } = await setup(t);
+  options.config.mode = 'dryrun-browser';
+  options.config.max_profiles_per_run = 10;
+  for (let i = 0; i < 3; i++)
+    storage.queue.append({ ...investor, slug: `investor-${i}` });
+  const logs: string[] = [];
+  options.log = (text) => logs.push(text);
+  const opened: string[] = [];
+  const messenger = {
+    openComposer: async (recipient: typeof investor) => {
+      opened.push(recipient.slug);
+      return {
+        kind: 'inmail' as const,
+        fill: async () => {
+          if (recipient.slug === 'investor-0')
+            throw new DraftVerificationError(
+              'Draft verification failed: message body differs',
+            );
+        },
+      };
+    },
+  };
+  assert.deepEqual(await runMessages({ ...options, messenger }), {
+    processed: 3,
+    displayed: 2,
+  });
+  assert.deepEqual(opened, ['investor-0', 'investor-1', 'investor-2']);
+  assert.deepEqual(
+    storage.queue.rows().map((row) => row.status),
+    ['failed', 'dryrun', 'dryrun'],
+  );
+  assert.match(storage.queue.rows()[0]!.failure, /message body differs/);
+  assert.match(logs.join('\n'), /Continuing to the next profile/);
+  assert.equal(output.length, 0);
 });

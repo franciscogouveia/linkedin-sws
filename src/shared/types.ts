@@ -41,7 +41,25 @@ export interface Assessment {
   reason: string;
 }
 
+export interface MessageDraft {
+  body: string;
+  subject?: string;
+}
+export interface MessageComposer {
+  kind: 'chat' | 'inmail';
+  fill(draft: MessageDraft): Promise<void>;
+}
+export interface LinkedInMessenger {
+  openComposer(recipient: Investor): Promise<MessageComposer>;
+}
+
 export interface PitchWriter {
+  writeSubject(
+    profile: Profile,
+    pitch: string,
+    body: string,
+    context?: OutreachContext,
+  ): Promise<string>;
   classify(profile: Profile): Promise<Assessment>;
   write(
     profile: Profile,
@@ -70,7 +88,7 @@ export interface QueueStore {
 export interface TextRequest {
   instructions: string;
   input: string;
-  operation: 'classification' | 'message generation';
+  operation: 'classification' | 'message generation' | 'subject generation';
   redactions: string[];
   format?: { name: string; schema: Record<string, unknown> };
 }
