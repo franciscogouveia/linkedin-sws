@@ -90,7 +90,11 @@ If the page is validated, the LLM is given the pitch from [pitch.md](./pitch.md)
 
 ## Communication
 
-Well, you saw the output, because only dry-run is implemented. Otherwise, a message would be placed and sent to the profile. *To be implemented.*
+Well, you saw the output in the terminal, because it used `dryrun-terminal` mode.
+
+Otherwise, with `dryrun-browser` mode, a message would be placed on the profile's chat form, but not sent.
+
+With `live` mode, the same as `dryrun-browser` would happen, but the message would be actually automatically sent. *To be implemented.*
 
 ## Note
 

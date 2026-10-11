@@ -1,5 +1,5 @@
 # Copy to config.yaml. All application settings live here; the CLI takes no arguments.
-mode: dryrun
+mode: dryrun-terminal
 pitch_path: pitch.md
 queue_path: data/queue.sqlite
 max_profiles_per_run: 10
