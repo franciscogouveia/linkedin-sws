@@ -1,6 +1,6 @@
 # Business and Funding Pitch
 
-FdG GmbH is a promising future unicorn. It has no purpose, but that's what makes it special.
+Useless Waste is a promising future unicorn. It has no purpose, but that's what makes it special.
 
 We sell certainty - our failure is guaranteed! Certainty is all we need, and that is what matters.
 
