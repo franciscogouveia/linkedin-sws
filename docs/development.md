@@ -111,8 +111,11 @@ Closing it during processing cancels outstanding work, preserving unfinished row
 as `working`. Ctrl+C remains an emergency interruption. Draft text is not saved
 in SQLite or local files; LinkedIn may not retain it after closure. Resetting queue
 rows does not clear LinkedIn drafts, so review existing drafts before retesting.
-Composer layout failures can save count-only `composer-layout-*.json` diagnostics
-beside the browser session; they contain no message text or profile identifiers.
+Composer failures report the stage and first line of the underlying browser error.
+`composer-layout-*.json` reports beside the browser session record whether the
+Message click completed, visible versus hidden dialogs, editor and frame counts,
+and Message control types. They contain no message text, profile identifiers, or
+full URLs. A dialog count alone does not establish that a composer opened.
 
 ## Configuration
 

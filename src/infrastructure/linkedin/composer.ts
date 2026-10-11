@@ -14,7 +14,8 @@ import type {
 } from '../../shared/types.ts';
 import { assertLinkedInPage, profileSlug } from './page.ts';
 import { inspectProfilePage } from './profile-page.ts';
-import { inspectComposer } from './composer-page.ts';
+import { inspectComposer, composerLayoutReport } from './composer-page.ts';
+import { composerFailure } from './composer-errors.ts';
 import { hasMessagePlaceholders } from '../../writing/llm.ts';
 
 async function fieldText(field: Locator): Promise<string> {
@@ -43,6 +44,8 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
   async openComposer(recipient: Investor): Promise<MessageComposer> {
     this.signal.throwIfAborted();
     const page = await this.context.newPage();
+    let stage = 'opening recipient profile';
+    let action = 'not attempted';
     try {
       await page.bringToFront();
       const response = await page.goto(
@@ -55,6 +58,7 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         throw new ApplicationError(
           `LinkedIn draft profile returned HTTP ${response.status()}. Queue row remains working.`,
         );
+      stage = 'waiting for recipient profile';
       const profile = await page.waitForFunction(inspectProfilePage, {
         expectedName: recipient.name,
       });
@@ -73,7 +77,11 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       } finally {
         await profile.dispose();
       }
-      await this.openMessageAction(page, recipient);
+      stage = 'opening profile Message action';
+      await this.openMessageAction(page, recipient, (value) => {
+        action = value;
+      });
+      stage = 'waiting for message composer after clicking Message';
       const token = randomUUID();
       const input = { name: recipient.name, slug: recipient.slug, token };
       const handle = await page.waitForFunction(inspectComposer, input);
@@ -155,28 +163,31 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         throw error;
       }
       if (!page.isClosed()) await assertLinkedInPage(page);
-      const diagnostic = await this.layoutDiagnostic(page);
+      const diagnostic = await this.layoutDiagnostic(
+        page,
+        stage,
+        action,
+        recipient,
+      );
       throw new ApplicationError(
-        `${error instanceof ApplicationError ? error.message : 'Cannot open a verified LinkedIn message composer. Review the browser layout and English interface; queue row remains working.'}${diagnostic}`,
+        `${error instanceof ApplicationError ? error.message : composerFailure(error, stage, recipient)}${diagnostic}`,
       );
     }
   }
 
-  private async layoutDiagnostic(page: Page): Promise<string> {
+  private async layoutDiagnostic(
+    page: Page,
+    stage: string,
+    action: string,
+    recipient: Investor,
+  ): Promise<string> {
     if (!this.diagnosticsDirectory || page.isClosed()) return '';
     try {
-      const report = await page.evaluate(() => ({
-        dialogs: document.querySelectorAll('[role="dialog"]').length,
-        conversationContainers: document.querySelectorAll(
-          '.msg-overlay-conversation-bubble, .msg-convo-wrapper, .msg-thread',
-        ).length,
-        editableFields: document.querySelectorAll(
-          '[contenteditable="true"], textarea',
-        ).length,
-        subjectFields: document.querySelectorAll(
-          'input[placeholder*="subject" i], input[aria-label*="subject" i]',
-        ).length,
-      }));
+      const layout = await page.evaluate(composerLayoutReport, {
+        name: recipient.name,
+        slug: recipient.slug,
+      });
+      const report = { stage, action, ...layout };
       await mkdir(this.diagnosticsDirectory, { recursive: true, mode: 0o700 });
       const path = join(
         this.diagnosticsDirectory,
@@ -192,6 +203,7 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
   private async openMessageAction(
     page: Page,
     recipient: Investor,
+    recordAction: (value: string) => void,
   ): Promise<void> {
     // Profile-owned controls only: exclude navigation and recommended profiles.
     const header = page.locator(
@@ -216,14 +228,18 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
       )
       .filter({ visible: true });
     if ((await action.count()) === 1 && (await action.isEnabled())) {
+      recordAction('clicking profile Message control');
       await action.click();
+      recordAction('profile Message control clicked');
       return;
     }
     const more = scope
       .getByRole('button', { name: /^(?:more|more actions)$/i })
       .filter({ visible: true });
     if ((await more.count()) === 1) {
+      recordAction('clicking profile More control');
       await more.click();
+      recordAction('profile More control clicked');
       const menu = page
         .locator('[role="menu"], .artdeco-dropdown__content')
         .filter({ visible: true });
@@ -232,7 +248,9 @@ export class LinkedInMessengerBrowser implements LinkedInMessenger {
         .or(menu.getByRole('button', { name: messageLabel }))
         .filter({ visible: true });
       if ((await message.count()) === 1 && (await message.isEnabled())) {
+        recordAction('clicking Message menu item');
         await message.click();
+        recordAction('Message menu item clicked');
         return;
       }
     }

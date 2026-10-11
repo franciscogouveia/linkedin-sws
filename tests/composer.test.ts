@@ -100,7 +100,7 @@ test(
           context,
           new AbortController().signal,
         ).openComposer(investor),
-        /verified LinkedIn message composer/,
+        /waiting for message composer after clicking Message/,
       );
       assert.equal(
         await context.pages()[0]!.locator('[contenteditable]').innerText(),
