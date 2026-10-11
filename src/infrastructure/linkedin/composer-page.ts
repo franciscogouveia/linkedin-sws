@@ -16,6 +16,38 @@ export function inspectComposer(input: {
   };
   const normalize = (text: string) =>
     text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const matchesName = (node: Element) => {
+    const expected = normalize(input.name);
+    const labelMatches = (text: string) => {
+      const label = normalize(text.replace(/[\u200b-\u200f\ufeff]/g, ''));
+      if (label === expected) return true;
+      // Only known UI annotations may follow an exact full name. Never accept a
+      // partial name (for example Alex Exampleton) or arbitrary extra name parts.
+      return (
+        label.startsWith(expected) &&
+        /^(?:\s*[•·,|–—-]?\s*(?:1st|2nd|3rd\+?|(?:1st|2nd|3rd\+?) degree(?: connection)?|premium|verified|status is (?:online|offline|reachable)|online|offline|active now))+[.!]?$/i.test(
+          label.slice(expected.length),
+        )
+      );
+    };
+    const rendered = (node as HTMLElement).innerText ?? node.textContent ?? '';
+    if (
+      labelMatches(rendered) ||
+      labelMatches(node.getAttribute('aria-label') ?? '')
+    )
+      return true;
+    // Accessibility/status spans can be concatenated into textContent even when
+    // the visible title consists solely of the recipient's name.
+    if (node.cloneNode) {
+      const title = node.cloneNode(true) as Element;
+      for (const extra of title.querySelectorAll(
+        '[aria-hidden="true"], [hidden], .visually-hidden, .sr-only',
+      ))
+        extra.remove();
+      if (labelMatches(title.textContent ?? '')) return true;
+    }
+    return false;
+  };
   const roots = [
     ...document.querySelectorAll(
       '[role="dialog"], .msg-overlay-conversation-bubble, .msg-convo-wrapper, .msg-thread',
@@ -62,17 +94,7 @@ export function inspectComposer(input: {
         'h1, h2, h3, [role="heading"], header a, header button, header span, .msg-overlay-bubble-header__title, .msg-thread__link-to-profile, .msg-thread__heading, .msg-thread__topic, .msg-entity-lockup__entity-title, .msg-entity-lockup__entity-title > span, .msg-form__recipient, .msg-connections-typeahead__recipient, [data-recipient-name]',
       ),
     ].filter((node) => visible(node) && outsideMessage(node));
-    if (
-      links.length
-        ? !matchingSlug
-        : !names.some(
-            (node) =>
-              normalize(node.textContent ?? '') === normalize(input.name) ||
-              normalize(node.getAttribute('aria-label') ?? '') ===
-                normalize(input.name),
-          )
-    )
-      continue;
+    if (links.length ? !matchingSlug : !names.some(matchesName)) continue;
     const subjects = [
       ...root.querySelectorAll(
         'input[name*="subject" i], input[placeholder*="subject" i], input[aria-label*="subject" i], textarea[name*="subject" i], textarea[placeholder*="subject" i]',
@@ -170,6 +192,38 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
       .trim();
   const normalize = (text: string) =>
     text.replace(/\s+/g, ' ').trim().toLowerCase();
+  const matchesName = (node: Element) => {
+    const expected = normalize(input.name);
+    const labelMatches = (text: string) => {
+      const label = normalize(text.replace(/[\u200b-\u200f\ufeff]/g, ''));
+      if (label === expected) return true;
+      // Only known UI annotations may follow an exact full name. Never accept a
+      // partial name (for example Alex Exampleton) or arbitrary extra name parts.
+      return (
+        label.startsWith(expected) &&
+        /^(?:\s*[•·,|–—-]?\s*(?:1st|2nd|3rd\+?|(?:1st|2nd|3rd\+?) degree(?: connection)?|premium|verified|status is (?:online|offline|reachable)|online|offline|active now))+[.!]?$/i.test(
+          label.slice(expected.length),
+        )
+      );
+    };
+    const rendered = (node as HTMLElement).innerText ?? node.textContent ?? '';
+    if (
+      labelMatches(rendered) ||
+      labelMatches(node.getAttribute('aria-label') ?? '')
+    )
+      return true;
+    // Accessibility/status spans can be concatenated into textContent even when
+    // the visible title consists solely of the recipient's name.
+    if (node.cloneNode) {
+      const title = node.cloneNode(true) as Element;
+      for (const extra of title.querySelectorAll(
+        '[aria-hidden="true"], [hidden], .visually-hidden, .sr-only',
+      ))
+        extra.remove();
+      if (labelMatches(title.textContent ?? '')) return true;
+    }
+    return false;
+  };
   return {
     pageKind: location.pathname.startsWith('/in/')
       ? 'profile'
@@ -248,12 +302,7 @@ export function composerLayoutReport(input: { name: string; slug: string }) {
         ].filter(visible);
         return {
           recipientNameCandidates: names.length,
-          recipientNameMatches: names.filter(
-            (node) =>
-              normalize(node.textContent ?? '') === normalize(input.name) ||
-              normalize(node.getAttribute('aria-label') ?? '') ===
-                normalize(input.name),
-          ).length,
+          recipientNameMatches: names.filter(matchesName).length,
           recipientProfileLinks: links.length,
           recipientSlugMatches: links.filter((node) => {
             try {

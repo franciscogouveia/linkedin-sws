@@ -170,7 +170,7 @@ test(
       },
     );
     await t.test(
-      'message center chat with plain recipient title and an InMail control',
+      'message center chat ignores hidden recipient-label text and an InMail control',
       async () => {
         const context = await browser.newContext();
         context.setDefaultTimeout(500);
@@ -178,7 +178,7 @@ test(
           '<button id="message">Message</button>',
           '<a id="message" href="/messaging/thread/example/">Message</a>',
         );
-        const chatHtml = `<main><aside><h2>Wrong Recipient</h2></aside><div class="msg-thread"><header><span>${investor.name}</span><button>InMail</button></header><a href="/in/unrelated-person/">Another profile</a><div class="msg-s-message-list"><p>Previous InMail</p></div><div contenteditable="true" role="textbox" aria-label="Write a message"></div><button id="send">Send</button></div></main><script>window.sent = 0; document.querySelector('#send').onclick = () => window.sent++;</script>`;
+        const chatHtml = `<main><aside><h2>Wrong Recipient</h2></aside><div class="msg-thread"><header><h2>${investor.name}<span class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)">View profile information</span></h2><button>InMail</button></header><a href="/in/unrelated-person/">Another profile</a><div class="msg-s-message-list"><p>Previous InMail</p></div><div contenteditable="true" role="textbox" aria-label="Write a message"></div><button id="send">Send</button></div></main><script>window.sent = 0; document.querySelector('#send').onclick = () => window.sent++;</script>`;
         await context.route('**/*', (route) =>
           route.fulfill({
             contentType: 'text/html',

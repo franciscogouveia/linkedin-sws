@@ -244,7 +244,9 @@ frames, and popup counts without draft text. `composerCandidates` also reports
 recipient-name matches, profile-link matches, editor counts, and InMail editor
 labels for each visible message container, including the full message center.
 Composer detection requires a matching recipient header slug (or exact active
-recipient name when no header slug is available) and one message editor. Other
+recipient name when no header slug is available) and one message editor.
+Name matching ignores hidden accessibility text, zero-width formatting, and known
+connection-degree or presence labels, while still rejecting different full names. Other
 profile links and UI labels do not reject the composer. An available subject
 field identifies InMail; other forms are prepared as chats. Draft readback and
 recipient verification before live sending remain in place. Browser failures preserve the first

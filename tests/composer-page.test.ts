@@ -12,6 +12,7 @@ import { investor } from './helpers.ts';
 function inspect(
   options: {
     name?: string;
+    renderedName?: string;
     selector?: string;
     editorLabel?: string;
     subject?: boolean;
@@ -32,7 +33,10 @@ function inspect(
     removeAttribute: (key: string) => attributes.delete(key),
     closest: (_selector: string): object | null => null,
   });
-  const name = element(options.name ?? investor.name);
+  const name = {
+    ...element(options.name ?? investor.name),
+    innerText: options.renderedName,
+  };
   name.closest = () => (options.excludedName ? {} : null);
   const body = element('', options.editorLabel ?? 'Write a message');
   const subject = element('', 'Subject');
@@ -152,4 +156,38 @@ test('plain semantic header text identifies the recipient without a LinkedIn-spe
   const result = inspect({ selector: 'header span' });
   assert.ok(result);
   assert.equal(result.kind, 'chat');
+});
+
+test('recipient verification reads rendered text instead of hidden accessibility text', () => {
+  const result = inspect({
+    name: `${investor.name}Hidden accessibility detail`,
+    renderedName: investor.name,
+  });
+  assert.ok(result);
+  assert.equal(result.kind, 'chat');
+});
+
+test('known connection and status annotations do not change recipient identity', () => {
+  for (const suffix of [
+    ' • 1st',
+    '\nStatus is online',
+    '\nPremium',
+    'Status is reachable',
+    ' • 2nd degree connection',
+  ]) {
+    const result = inspect({ name: investor.name + suffix });
+    assert.ok(result, suffix);
+    assert.equal(result.kind, 'chat');
+  }
+  for (const suffix of ['ton', ' Junior', ' and Another Recipient'])
+    assert.equal(inspect({ name: investor.name + suffix }), false);
+});
+
+test('diagnostics use the same visible-name matching as composer verification', () => {
+  const result = inspect({
+    name: investor.name + 'Status is online',
+    report: true,
+  });
+  assert.ok(result);
+  assert.equal(result.composerCandidates?.[0]?.recipientNameMatches, 1);
 });
